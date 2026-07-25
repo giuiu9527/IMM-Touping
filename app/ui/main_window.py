@@ -6,6 +6,7 @@
 """
 import os
 import re
+import sys
 import threading
 import datetime
 import tkinter as tk
@@ -126,6 +127,62 @@ class EditDeviceDialog(tb.Toplevel):
             num = 0
         self.on_ok(self.tags, num)
         self.destroy()
+
+
+class UpdateDialog(tb.Toplevel):
+    """自动更新：下载新版(带进度) -> 替换 -> 重启。"""
+    def __init__(self, app, info):
+        super().__init__(app.root)
+        self.app = app
+        self.info = info
+        self.title("软件更新")
+        self.resizable(False, False)
+        self.transient(app.root)
+        tb.Label(self, text=f"发现新版本 v{info['version']}（当前 v{config.APP_VERSION}）",
+                 font=(FONT, 11, "bold")).pack(padx=24, pady=(18, 6))
+        self.status = tb.Label(self, text="点击「立即更新」自动下载并重启", bootstyle="secondary")
+        self.status.pack(padx=24)
+        self.pb = tb.Progressbar(self, length=340, mode="determinate")
+        self.pb.pack(padx=24, pady=12)
+        bar = tb.Frame(self)
+        bar.pack(padx=24, pady=(0, 18), fill=X)
+        self.btn = tb.Button(bar, text="立即更新", bootstyle="success", command=self._start)
+        self.btn.pack(side=RIGHT, padx=4)
+        tb.Button(bar, text="以后再说", bootstyle="secondary-outline",
+                  command=self.destroy).pack(side=RIGHT)
+        center_window(self)
+        self.grab_set()
+
+    def _start(self):
+        self.btn.configure(state="disabled")
+        threading.Thread(target=self._worker, daemon=True).start()
+
+    def _worker(self):
+        import tempfile
+        tmp = os.path.join(tempfile.gettempdir(), "imm_update.zip")
+
+        def prog(done, total):
+            pct = int(done * 100 / total) if total else 0
+            self.after(0, lambda: (self.pb.configure(value=pct),
+                                   self.status.configure(text=f"下载中… {pct}%")))
+        try:
+            updater.download(self.info["asset_url"], tmp, prog)
+        except Exception as e:
+            self.after(0, lambda: (self.status.configure(text=f"下载失败：{e}"),
+                                   self.btn.configure(state="normal")))
+            return
+        self.after(0, lambda: self._apply(tmp))
+
+    def _apply(self, tmp):
+        self.status.configure(text="正在替换并重启…")
+        try:
+            updater.apply_update(tmp, config.ROOT, os.path.basename(sys.executable))
+        except Exception as e:
+            self.status.configure(text=f"更新失败：{e}")
+            self.btn.configure(state="normal")
+            return
+        self.app.scrcpy.stop_all()
+        self.app.root.after(400, lambda: os._exit(0))   # 退出，让脚本替换文件后重启
 
 
 class SoloWindow(tb.Toplevel):
@@ -499,14 +556,16 @@ class App:
     # ---------------- 在线更新 ----------------
     def _check_update_async(self, manual=False):
         def worker():
-            res = updater.check_update(config.GITHUB_OWNER, config.GITHUB_REPO, config.APP_VERSION)
+            info = updater.check_update(config.GITHUB_OWNER, config.GITHUB_REPO, config.APP_VERSION)
 
             def show():
-                if res:
-                    ver, url = res
-                    if messagebox.askyesno("发现新版本",
-                                           f"有新版本 v{ver}（当前 v{config.APP_VERSION}）。\n是否打开下载页面？"):
-                        webbrowser.open(url)
+                if info:
+                    frozen = getattr(sys, "frozen", False)
+                    if frozen and info.get("asset_url"):
+                        UpdateDialog(self, info)         # 打包版：自动下载+重启
+                    elif messagebox.askyesno("发现新版本",
+                                             f"有新版本 v{info['version']}（当前 v{config.APP_VERSION}）。\n是否打开下载页面？"):
+                        webbrowser.open(info["html_url"])
                 elif manual:
                     messagebox.showinfo("检查更新", f"当前已是最新版本 v{config.APP_VERSION}")
             self.root.after(0, show)
