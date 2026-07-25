@@ -209,11 +209,15 @@ class SoloWindow(tb.Toplevel):
         self.video.pack(fill=BOTH, expand=True)
         self.bind("<Configure>", self._reposition)
 
-        title = app.scrcpy.start_solo_embed_process(device)
+        # 直接在视频区所在屏幕位置启动 scrcpy，避免离屏导致 SDL 黑屏
+        self.update_idletasks()
+        vx, vy = self.video.winfo_rootx(), self.video.winfo_rooty()
+        vw, vh = self.video.winfo_width(), self.video.winfo_height()
+        title = app.scrcpy.start_solo_embed_process(device, vx, vy, max(100, vw), max(100, vh))
 
         def find():
             h = embed.find_hwnd_by_title(title)
-            time.sleep(1.5)
+            time.sleep(1.2)
             self.after(0, lambda: self._attach(h))
         threading.Thread(target=find, daemon=True).start()
 
@@ -223,6 +227,18 @@ class SoloWindow(tb.Toplevel):
         embed.set_owner(h, embed.root_hwnd(int(self.winfo_id())))
         self.hwnd = h
         self._reposition()
+        # 主动触发 SDL 重绘（改 1px 尺寸再还原），修复偶发黑屏
+        self.after(250, lambda: self._nudge(2))
+        self.after(500, lambda: self._nudge(0))
+        self.after(1200, lambda: self._nudge(2))
+        self.after(1400, lambda: self._nudge(0))
+
+    def _nudge(self, dh):
+        if not (self.hwnd and self.winfo_exists() and self.video.winfo_ismapped()):
+            return
+        v = self.video
+        embed.place(self.hwnd, v.winfo_rootx(), v.winfo_rooty(),
+                    v.winfo_width(), v.winfo_height() + dh)
 
     def _reposition(self, _=None):
         if self.hwnd and self.video.winfo_ismapped():
@@ -276,6 +292,7 @@ class App:
         self.solo_windows = {}          # serial -> SoloWindow
         self._rec_labels = []           # REC 指示灯(做呼吸动画)
         self._ratios = {}               # serial -> 屏幕宽/高比例(格子按此贴合)
+        self._numbers = {}              # serial -> 显示编号(连续不重复)
         self._encoder_cache = []        # 编码器检测缓存
         self._known_serials = set()
         self._last_cols = 0
@@ -394,7 +411,22 @@ class App:
         self.root.after(4000, self._poll)
 
     def _sync(self, devs):
-        devs.sort(key=lambda d: self.book.number(d.serial, 9999))
+        # 分配显示编号：自定义编号的用自定义，其余按序填补空缺，保证连续不重复
+        devs.sort(key=lambda d: (self.book.number(d.serial, 9999), d.serial))
+        claimed = {self.book.number(d.serial, 0) for d in devs if self.book.number(d.serial, 0)}
+        self._numbers = {}
+        nxt = 1
+        for d in devs:
+            n = self.book.number(d.serial, 0)
+            if n:
+                self._numbers[d.serial] = n
+            else:
+                while nxt in claimed:
+                    nxt += 1
+                self._numbers[d.serial] = nxt
+                claimed.add(nxt)
+                nxt += 1
+        devs.sort(key=lambda d: self._numbers[d.serial])
         self.devices = devs
         online = {d.serial for d in devs if d.is_online}
         new = online - self._known_serials
@@ -444,13 +476,13 @@ class App:
             w.destroy()
         new_vars = {}
         for idx, d in enumerate(devs):
-            num = self.book.number(d.serial, idx + 1)
+            num = self._display_number(d)
             row = tb.Frame(self.list_frame)
             row.pack(fill=X, pady=2, padx=2)
             var = self.check_vars.get(d.serial, tk.BooleanVar())
             new_vars[d.serial] = var
             tb.Checkbutton(row, variable=var, bootstyle="round-toggle").pack(side=LEFT, padx=(2, 4))
-            tb.Label(row, text=str(num), width=2, bootstyle="info").pack(side=LEFT)
+            tb.Label(row, text=f"{num:02d}", width=2, bootstyle="info").pack(side=LEFT)
             self._render_tag_chips(
                 row, self._device_tags(d),
                 on_click=lambda tag, dev=d: self._activate_tag(dev, tag))
@@ -680,6 +712,17 @@ class App:
         embed.set_owner(hwnd, self._owner_hwnd())
         tile["hwnd"] = hwnd
         self._position_overlay(serial)
+        # 触发 SDL 重绘，避免偶发黑屏
+        self.root.after(300, lambda: self._nudge_overlay(serial, 2))
+        self.root.after(500, lambda: self._nudge_overlay(serial, 0))
+
+    def _nudge_overlay(self, serial, dh):
+        tile = self.tiles.get(serial)
+        if not tile or not tile["hwnd"] or not tile["video"].winfo_ismapped():
+            return
+        v = tile["video"]
+        embed.place(tile["hwnd"], v.winfo_rootx(), v.winfo_rooty(),
+                    v.winfo_width(), v.winfo_height() + dh)
 
     def _owner_hwnd(self):
         return embed.root_hwnd(int(self.root.winfo_id()))
@@ -708,7 +751,7 @@ class App:
         for w in header.winfo_children():
             w.destroy()
         num = self._display_number(dev)
-        tk.Label(header, text=str(num), bg=self.C_HEADER, fg=self.colors.primary,
+        tk.Label(header, text=f"{num:02d}", bg=self.C_HEADER, fg=self.colors.primary,
                  font=(FONT, 8, "bold")).pack(side=LEFT, padx=(4, 2))
         tags = self._device_tags(dev)
         fs = 9 if len(tags) <= 2 else 8 if len(tags) <= 4 else 7 if len(tags) <= 6 else 6
@@ -807,14 +850,8 @@ class App:
             self.root.after(i * 800, lambda dev=d: self._do_start_record(dev))
 
     def _display_number(self, device):
-        """有效编号：自定义了就用自定义，否则用它在列表中的位置(1 起)。"""
-        n = self.book.number(device.serial, 0)
-        if n:
-            return n
-        for i, d in enumerate(self.devices):
-            if d.serial == device.serial:
-                return i + 1
-        return 1
+        """有效编号（连续不重复），由 _sync 统一分配。"""
+        return self._numbers.get(device.serial, 1)
 
     def _record_config(self, device):
         """该设备的有效录制参数：有独立设置用自己的，否则用通用设置。"""

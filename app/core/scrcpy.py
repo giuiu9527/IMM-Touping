@@ -176,20 +176,26 @@ class ScrcpyManager:
         self._procs[key] = subprocess.Popen(cmd, creationflags=_NO_WINDOW)
         return title
 
-    def start_solo_embed_process(self, device):
-        """启动无边框独立投屏进程供嵌入（独立窗口画质），返回窗口标题。"""
+    def start_solo_embed_process(self, device, x=None, y=None, w=None, h=None):
+        """启动无边框独立投屏进程供嵌入（独立窗口画质），返回窗口标题。
+
+        直接在目标屏幕位置启动（不去屏幕外），避免 SDL 在离屏时暂停渲染导致黑屏。
+        """
         s = self.settings
         title = f"__solo_{device.serial}"
         key = (device.serial, "solo")
         self._cleanup()
         if key in self._procs:
             return title
-        w = s.solo_window_size
-        h = int(w * 1.9)
+        if w is None:
+            w = s.solo_window_size
+            h = int(w * 1.9)
+        if x is None:
+            x, y = -3000, -3000
         cmd = self._build_base(device.serial, s.solo_resolution, s.solo_fluidity, title)
         cmd += ["--window-borderless",
-                "--window-x", "-3000", "--window-y", "-3000",
-                "--window-width", str(w), "--window-height", str(h)]
+                "--window-x", str(int(x)), "--window-y", str(int(y)),
+                "--window-width", str(int(w)), "--window-height", str(int(h))]
         self._procs[key] = subprocess.Popen(cmd, creationflags=_NO_WINDOW)
         return title
 
