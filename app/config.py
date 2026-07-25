@@ -20,7 +20,7 @@ SCRCPY_EXE = os.path.join(SCRCPY_DIR, "scrcpy.exe")
 ADB_EXE = os.path.join(SCRCPY_DIR, "adb.exe")
 # 应用信息
 APP_NAME = "IMM投屏"
-APP_VERSION = "0.1.4"
+APP_VERSION = "0.1.5"
 GITHUB_OWNER = "loadingkuu"
 GITHUB_REPO = "IMM-Touping"          # 仓库名，发布时确认
 
@@ -84,9 +84,9 @@ class Settings:
     record_fps: int = 60                 # 帧率
     record_video_codec: str = "h264"     # 视频编码 h264/h265/av1
     record_video_encoder: str = ""       # 具体编码器(空=自动选)，如 c2.qti.avc.encoder
-    record_format: str = "mp4"           # 容器格式 mp4/mkv
+    record_format: str = "mkv"           # 容器格式 mp4/mkv（opus 需 mkv）
     record_audio: bool = True            # 是否录制声音
-    record_audio_codec: str = "aac"      # 音频编码（mp4 建议 aac）
+    record_audio_codec: str = "opus"     # 音频编码：opus 比 aac 更大声（和 escrcpy 一致）
     record_time_limit: int = 0           # 录制时长上限(秒)，0=不限
 
     # 存储设置
@@ -96,6 +96,21 @@ class Settings:
     # 窗口记忆
     window_geometry: str = ""            # 上次窗口大小/位置，如 1160x740+100+50
     window_maximized: bool = False       # 上次是否最大化
+
+    # 内部：一次性迁移标记
+    audio_default_migrated: bool = False  # 把旧的 aac 默认迁移到更大声的 opus
+
+    def _migrate(self):
+        changed = False
+        if not self.audio_default_migrated:
+            if self.record_audio_codec == "aac":     # 旧默认 aac 偏小声，换成 opus
+                self.record_audio_codec = "opus"
+                if self.record_format == "mp4":
+                    self.record_format = "mkv"        # opus 需要 mkv 容器
+            self.audio_default_migrated = True
+            changed = True
+        if changed:
+            self.save()
 
     def effective_records_dir(self):
         return self.records_dir or RECORDS_DIR
@@ -126,7 +141,9 @@ class Settings:
                     data = json.load(f)
                 # 只取已知字段，向前兼容新增/删除字段
                 known = {k: v for k, v in data.items() if k in cls.__annotations__}
-                return cls(**known)
+                obj = cls(**known)
+                obj._migrate()
+                return obj
             except Exception:
                 pass
         return cls()

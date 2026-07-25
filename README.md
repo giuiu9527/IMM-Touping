@@ -58,8 +58,9 @@ python -m PyInstaller --noconfirm --clean --onefile --windowed --name IMM-Toupin
 
 ## 录制说明
 
-- 剪辑兼容性最佳组合：**h264 + mp4 + aac**（LosslessCut 等都能直接打开）
-- h265 体积更小但兼容差；用 h265 建议容器选 mkv
+- 默认 **h264 + mkv + opus**：opus 比 aac 明显更大声（和 escrcpy 一致），mkv+h264 剪辑软件（含 LosslessCut）也能直接打开
+- 若一定要 mp4，音频请选 aac（opus 不适合 mp4，且 aac 偏小声）
+- h265 体积更小但兼容差
 - 「设置→录制」可点「重新检测」列出手机实际支持的硬件/软件编码器
 - 录屏默认存软件目录 `records/`，可在「设置→存储」自定义位置和命名模板
 
