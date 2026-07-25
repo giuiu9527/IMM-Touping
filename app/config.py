@@ -6,10 +6,15 @@
 """
 import json
 import os
+import sys
 from dataclasses import dataclass, asdict, field
 
-# 项目根目录（本文件在 app/ 下）
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# 根目录：打包成 exe 后用 exe 所在目录（scrcpy/、settings.json 等都放它旁边）；
+# 源码运行时用项目目录。
+if getattr(sys, "frozen", False):
+    ROOT = os.path.dirname(sys.executable)
+else:
+    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRCPY_DIR = os.path.join(ROOT, "scrcpy")
 SCRCPY_EXE = os.path.join(SCRCPY_DIR, "scrcpy.exe")
 ADB_EXE = os.path.join(SCRCPY_DIR, "adb.exe")

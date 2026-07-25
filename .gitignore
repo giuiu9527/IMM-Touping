@@ -11,3 +11,8 @@ debug.log
 # Python
 __pycache__/
 *.pyc
+
+# PyInstaller 打包产物
+build/
+dist/
+*.spec

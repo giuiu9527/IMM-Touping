@@ -34,6 +34,22 @@ python -m app.main
 
 > 发布页的 zip 已包含 scrcpy，下载解压即用，无需另配。
 
+## 免安装版（推荐普通用户）
+
+到 [Releases](https://github.com/loadingkuu/IMM-Touping/releases) 下载
+`IMM-Touping-vX.Y.Z-portable.zip`，解压后双击 `IMM-Touping.exe` 即可，**无需装 Python**。
+（exe 必须和同目录的 `scrcpy/` 一起，不要单独移动。）
+
+## 自己打包 exe
+
+```bash
+pip install pyinstaller
+python -m PyInstaller --noconfirm --clean --onefile --windowed --name IMM-Touping \
+  --collect-all tkinterdnd2 --collect-all ttkbootstrap imm.py
+```
+
+产物在 `dist/IMM-Touping.exe`，把 `scrcpy/` 拷到它旁边即可运行。
+
 ## 手机准备
 
 1. 开启「开发者选项 → USB 调试」
