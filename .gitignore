@@ -1,0 +1,13 @@
+# 第三方引擎（体积大，不入库；发布包里另附）
+scrcpy/
+scrcpy.zip
+
+# 运行时生成
+records/
+settings.json
+devices.json
+debug.log
+
+# Python
+__pycache__/
+*.pyc
