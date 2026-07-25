@@ -15,7 +15,7 @@ SCRCPY_EXE = os.path.join(SCRCPY_DIR, "scrcpy.exe")
 ADB_EXE = os.path.join(SCRCPY_DIR, "adb.exe")
 # 应用信息
 APP_NAME = "IMM投屏"
-APP_VERSION = "0.1"
+APP_VERSION = "0.1.1"
 GITHUB_OWNER = "loadingkuu"
 GITHUB_REPO = "IMM-Touping"          # 仓库名，发布时确认
 
@@ -87,6 +87,10 @@ class Settings:
     # 存储设置
     records_dir: str = ""                # 录屏保存目录，空=默认 records/
     naming_template: str = "Recording-{num2}-{firsttag}-{time}"   # 文件命名模板
+
+    # 窗口记忆
+    window_geometry: str = ""            # 上次窗口大小/位置，如 1160x740+100+50
+    window_maximized: bool = False       # 上次是否最大化
 
     def effective_records_dir(self):
         return self.records_dir or RECORDS_DIR

@@ -74,6 +74,19 @@ class Adb:
         code, out = self._run(["reboot"], serial=serial, timeout=15)
         return code == 0, out.strip()
 
+    def get_resolution(self, serial: str):
+        """返回 (宽, 高) 物理分辨率，失败返回 None。"""
+        code, out = self._run(["shell", "wm", "size"], serial=serial, timeout=8)
+        if code != 0:
+            return None
+        # 优先取 Override size，没有则 Physical size
+        import re
+        m = re.findall(r"(\d+)\s*x\s*(\d+)", out)
+        if not m:
+            return None
+        w, h = m[-1]
+        return int(w), int(h)
+
     def getprops(self, serial: str, keys) -> dict:
         """批量读取 getprop 值。"""
         result = {}

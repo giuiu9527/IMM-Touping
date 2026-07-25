@@ -21,6 +21,7 @@ GWLP_HWNDPARENT = -8
 GA_ROOT = 2
 SW_SHOWNOACTIVATE = 4
 SWP_NOACTIVATE = 0x0010
+SWP_NOZORDER = 0x0004
 SWP_SHOWWINDOW = 0x0040
 WS_CHILD = 0x40000000
 WS_POPUP = 0x80000000
@@ -91,10 +92,10 @@ def set_owner(child_hwnd, owner_hwnd):
 
 
 def place(child_hwnd, x, y, w, h):
-    """定位并显示，不抢焦点。"""
+    """定位并显示，不抢焦点、不改变层级(避免把主窗口顶到独立窗口之上)。"""
     if w > 0 and h > 0:
         user32.SetWindowPos(child_hwnd, 0, int(x), int(y), int(w), int(h),
-                            SWP_NOACTIVATE | SWP_SHOWWINDOW)
+                            SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOZORDER)
 
 
 def close(child_hwnd):

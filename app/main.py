@@ -6,15 +6,35 @@
 """
 import os
 import sys
+import ctypes
 import tkinter.messagebox as mb
 
 # 允许直接 `python app/main.py` 运行
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-# 注意：不要在这里开启进程级 DPI 感知。
-# 实测进程一旦 DPI-aware，被本程序“从属化(SetParent/set_owner)”的 scrcpy 悬浮窗口
-# 会在几秒内被系统销毁，导致群控画面消失。字体清晰度改用其它方式处理。
+def _enable_dpi():
+    """开启 PerMonitorV2 高 DPI 感知：4K/高缩放屏字体清晰。
+
+    必须用 PMv2（context = -4）：它支持“高感知窗口托管低感知子窗口”，
+    会自动缩放被托管的 scrcpy 画面而不销毁它；老的 PM v1 / 系统感知会杀掉
+    被 set_owner 的 scrcpy 悬浮窗口，导致群控黑屏/消失。
+    """
+    try:
+        if ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
+            return
+    except Exception:
+        pass
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+
+_enable_dpi()
 
 from app import config
 from app.ui.main_window import App

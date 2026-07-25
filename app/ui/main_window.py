@@ -188,6 +188,10 @@ class App:
         self.root = TkinterDnD.Tk() if _HAS_DND else tk.Tk()
         self.style = tb.Style(THEME)
         self.colors = self.style.colors
+        try:      # 配合 PMv2 DPI 感知，按屏幕 DPI 缩放，字体清晰且大小正常
+            self.root.tk.call("tk", "scaling", self.root.winfo_fpixels("1i") / 72.0)
+        except Exception:
+            pass
         # 亮色界面下各处颜色（tk 原生控件需手动上色）
         self.C_GRID = "#e9ecef"       # 右侧网格背景
         self.C_TILE_BORDER = "#c4cad2"
@@ -195,8 +199,17 @@ class App:
         self.C_TAG_OFF_BG = "#e2e6ea"  # 未激活标签
         self.C_TAG_OFF_FG = "#495057"
         self.root.title(f"{config.APP_NAME} v{config.APP_VERSION}")
-        self.root.geometry("1160x740")
-        center_window(self.root)
+        if self.settings.window_geometry:            # 恢复上次窗口大小/位置
+            try:
+                self.root.geometry(self.settings.window_geometry)
+            except Exception:
+                self.root.geometry("1160x740")
+                center_window(self.root)
+            if self.settings.window_maximized:
+                self.root.state("zoomed")
+        else:
+            self.root.geometry("1160x740")
+            center_window(self.root)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self.devices = []
@@ -204,6 +217,8 @@ class App:
         self.tiles = {}
         self.recording = set()          # 正在录制的设备序列号
         self.solo_windows = {}          # serial -> SoloWindow
+        self._rec_labels = []           # REC 指示灯(做呼吸动画)
+        self._ratios = {}               # serial -> 屏幕宽/高比例(格子按此贴合)
         self._encoder_cache = []        # 编码器检测缓存
         self._known_serials = set()
         self._last_cols = 0
@@ -217,6 +232,7 @@ class App:
 
         self.adb.start_server()
         self._poll()
+        self._pulse_rec()                                  # REC 呼吸动画
         self.root.after(2500, self._check_update_async)   # 启动后静默检查更新
 
     # ---------------- 布局 ----------------
@@ -280,7 +296,9 @@ class App:
         self.list_frame = tb.Frame(canvas)
         self.list_frame.bind("<Configure>",
                              lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=self.list_frame, anchor="nw")
+        _win = canvas.create_window((0, 0), window=self.list_frame, anchor="nw")
+        # 让内部行随画布宽度铺满，REC 才能真正靠到最右
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(_win, width=e.width))
         canvas.configure(yscrollcommand=sb.set)
         canvas.pack(side=LEFT, fill=BOTH, expand=True)
         sb.pack(side=RIGHT, fill=Y)
@@ -382,8 +400,10 @@ class App:
             if not d.is_online:
                 tb.Label(row, text="离线", bootstyle="danger").pack(side=LEFT, padx=2)
             if d.serial in self.recording:
-                tb.Label(row, text="● REC", bootstyle="danger",
-                         font=(FONT, 8, "bold")).pack(side=RIGHT, padx=2)
+                rec = tk.Label(row, text="● REC", fg="#ff2d2d", bg=self.colors.bg,
+                               font=(FONT, 8, "bold"))
+                rec.pack(side=RIGHT, padx=6)
+                self._rec_labels.append(rec)
             dbl = lambda e, dev=d: self._edit_device(dev)
             row.bind("<Double-Button-1>", dbl)
             # 右键菜单（整行含子控件都能触发）
@@ -507,6 +527,26 @@ class App:
         w = self.settings.group_window_size
         return w, int(w * 1.9)
 
+    def _device_ratio(self, serial):
+        r = self._ratios.get(serial)
+        return r if r else 0.462        # 默认竖屏比例
+
+    def _tile_dims(self, serial):
+        """按手机真实屏幕比例算格子画面尺寸，scrcpy 才能刚好填满不错位。"""
+        w = self.settings.group_window_size
+        return w, int(w / self._device_ratio(serial))
+
+    def _resize_tile(self, serial):
+        tile = self.tiles.get(serial)
+        if not tile:
+            return
+        w, h = self._tile_dims(serial)
+        tile["video"].configure(width=w, height=h)
+        self._last_cols = 0
+        self.root.update_idletasks()
+        self._reflow()
+        self._position_overlay(serial)
+
     def _nudge_tile_size(self, delta):
         new = max(160, min(600, self.settings.group_window_size + delta))
         if new == self.settings.group_window_size:
@@ -516,8 +556,8 @@ class App:
         self._apply_tile_size()
 
     def _apply_tile_size(self):
-        tw, th = self._tile_size()
-        for tile in self.tiles.values():
+        for serial, tile in self.tiles.items():
+            tw, th = self._tile_dims(serial)
             tile["video"].configure(width=tw, height=th)
         self._last_cols = 0
         self.root.update_idletasks()
@@ -529,7 +569,7 @@ class App:
     def _embed_device(self, device):
         if not device.is_online or device.serial in self.tiles:
             return
-        tw, th = self._tile_size()
+        tw, th = self._tile_dims(device.serial)
         frame = tk.Frame(self.grid_frame, bg=self.C_TILE_BORDER,
                          highlightthickness=1, highlightbackground=self.C_TILE_BORDER)
         header = tk.Frame(frame, bg=self.C_HEADER)
@@ -561,6 +601,11 @@ class App:
         self.log(f"投屏: {self.book.name(device.serial, device.display_name)}")
 
         def find_and_attach():
+            if device.serial not in self._ratios:      # 先拿手机真实比例，贴合格子
+                res = self.adb.get_resolution(device.serial)
+                if res and res[1]:
+                    self._ratios[device.serial] = res[0] / res[1]
+                    self.root.after(0, lambda: self._resize_tile(device.serial))
             hwnd = embed.find_hwnd_by_title(title)
             time.sleep(1.5)   # 等 scrcpy 窗口/渲染器初始化完成，过早接管会导致它崩溃
             self.root.after(0, lambda: self._attach(device.serial, hwnd))
@@ -603,17 +648,18 @@ class App:
         header = tile["header"]
         for w in header.winfo_children():
             w.destroy()
-        num = self.book.number(serial, 0)
-        if num:
-            tk.Label(header, text=str(num), bg=self.C_HEADER, fg=self.colors.primary,
-                     font=(FONT, 8, "bold")).pack(side=LEFT, padx=(4, 2))
+        num = self._display_number(dev)
+        tk.Label(header, text=str(num), bg=self.C_HEADER, fg=self.colors.primary,
+                 font=(FONT, 8, "bold")).pack(side=LEFT, padx=(4, 2))
         tags = self._device_tags(dev)
         fs = 9 if len(tags) <= 2 else 8 if len(tags) <= 4 else 7 if len(tags) <= 6 else 6
         self._render_tag_chips(header, tags, font_size=fs,
                                on_click=lambda tag, d=dev: self._activate_tag(d, tag))
         if serial in self.recording:
-            tk.Label(header, text="● REC", bg=self.C_HEADER, fg="#e03131",
-                     font=(FONT, 8, "bold")).pack(side=RIGHT, padx=3)
+            rec = tk.Label(header, text="● REC", bg=self.C_HEADER, fg="#ff2d2d",
+                           font=(FONT, 8, "bold"))
+            rec.pack(side=RIGHT, padx=4)
+            self._rec_labels.append(rec)
         header.bind("<Double-Button-1>", lambda e, d=dev: self._edit_device(d))
 
     def _remove_tile(self, serial):
@@ -701,13 +747,23 @@ class App:
         for i, d in enumerate(devs):     # 错开启动，避免多台同时抢占
             self.root.after(i * 800, lambda dev=d: self._do_start_record(dev))
 
+    def _display_number(self, device):
+        """有效编号：自定义了就用自定义，否则用它在列表中的位置(1 起)。"""
+        n = self.book.number(device.serial, 0)
+        if n:
+            return n
+        for i, d in enumerate(self.devices):
+            if d.serial == device.serial:
+                return i + 1
+        return 1
+
     def _record_config(self, device):
         """该设备的有效录制参数：有独立设置用自己的，否则用通用设置。"""
         return self.book.record_override(device.serial) or self.settings.record_config()
 
     def _record_path(self, device, rec):
         s = self.settings
-        num = self.book.number(device.serial, 0)
+        num = self._display_number(device)
         tags = self._device_tags(device)      # 第一个是当前激活标签
         tokens = {
             "num": str(num or ""),
@@ -765,6 +821,21 @@ class App:
         else:
             self._do_start_record(device)
 
+    # REC 呼吸动画：颜色在亮红-暗红之间循环
+    _REC_COLORS = ["#ff2d2d", "#ff6b6b", "#ffb3b3", "#ff6b6b"]
+
+    def _pulse_rec(self):
+        self._rec_labels = [l for l in self._rec_labels if l.winfo_exists()]
+        phase = getattr(self, "_rec_phase", 0)
+        col = self._REC_COLORS[phase % len(self._REC_COLORS)]
+        self._rec_phase = phase + 1
+        for l in self._rec_labels:
+            try:
+                l.config(fg=col)
+            except Exception:
+                pass
+        self.root.after(450, self._pulse_rec)
+
     def _refresh_rec_ui(self, serial):
         tile = self.tiles.get(serial)
         if tile and tile.get("recbtn"):
@@ -819,6 +890,15 @@ class App:
         self.root.after(0, _append)
 
     def _on_close(self):
+        try:      # 记住窗口大小/位置；最大化时保留上次的正常尺寸
+            if self.root.state() == "zoomed":
+                self.settings.window_maximized = True
+            else:
+                self.settings.window_maximized = False
+                self.settings.window_geometry = self.root.geometry()
+            self.settings.save()
+        except Exception:
+            pass
         self.scrcpy.stop_all()
         self.root.destroy()
 
