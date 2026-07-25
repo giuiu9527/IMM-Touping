@@ -776,7 +776,7 @@ class App:
         avail = max(1, self.grid_frame.winfo_width())
         cols = max(1, avail // (tw + 6))
         ordered = sorted(self.tiles.items(),
-                         key=lambda kv: self.book.number(kv[0], 9999))
+                         key=lambda kv: self._numbers.get(kv[0], 9999))
         for i, (serial, tile) in enumerate(ordered):
             r, c = divmod(i, cols)
             tile["frame"].grid(row=r, column=c, padx=2, pady=2, sticky="n")
