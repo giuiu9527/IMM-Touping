@@ -168,10 +168,10 @@ class ScrcpyManager:
         self._procs[key] = subprocess.Popen(cmd, creationflags=_NO_WINDOW)
 
     # ---------- 群控窗口（嵌入软件网格） ----------
-    def start_embed_process(self, device):
+    def start_embed_process(self, device, x=-3000, y=-3000, w=300, h=570):
         """启动一个无边框 scrcpy 供嵌入，返回窗口标题(用于查找句柄)。
 
-        先把窗口开在屏幕外，避免嵌入前闪一下；由 UI 找到句柄后 SetParent。
+        默认开在屏幕外(-3000)：避免嵌入前在桌面闪一下；由 UI 找到句柄后 set_owner 再定位进格子。
         """
         s = self.settings
         title = f"__grp_{device.serial}"
@@ -179,33 +179,23 @@ class ScrcpyManager:
         self._cleanup()
         if key in self._procs:
             return title            # 已在跑
-        w = s.group_window_size
-        h = int(w * 1.9)
         cmd = self._build_base(device.serial, s.group_resolution, s.group_fluidity, title)
-        cmd += ["--window-borderless", "--no-audio",   # 群控不播放/不占用声音
-                "--window-x", "-3000", "--window-y", "-3000",
-                "--window-width", str(w), "--window-height", str(h)]
+        cmd += ["--window-borderless", "--no-audio",
+                "--window-x", str(int(x)), "--window-y", str(int(y)),
+                "--window-width", str(int(w)), "--window-height", str(int(h))]
         if not s.direct_control:
             cmd.append("--no-control")
         self._procs[key] = subprocess.Popen(cmd, creationflags=_NO_WINDOW)
         return title
 
-    def start_solo_embed_process(self, device, x=None, y=None, w=None, h=None):
-        """启动无边框独立投屏进程供嵌入（独立窗口画质），返回窗口标题。
-
-        直接在目标屏幕位置启动（不去屏幕外），避免 SDL 在离屏时暂停渲染导致黑屏。
-        """
+    def start_solo_embed_process(self, device, x=300, y=200, w=360, h=640):
+        """启动无边框独立投屏进程供嵌入（独立窗口画质），返回窗口标题。"""
         s = self.settings
         title = f"__solo_{device.serial}"
         key = (device.serial, "solo")
         self._cleanup()
         if key in self._procs:
             return title
-        if w is None:
-            w = s.solo_window_size
-            h = int(w * 1.9)
-        if x is None:
-            x, y = -3000, -3000
         cmd = self._build_base(device.serial, s.solo_resolution, s.solo_fluidity, title)
         cmd += ["--window-borderless",
                 "--window-x", str(int(x)), "--window-y", str(int(y)),

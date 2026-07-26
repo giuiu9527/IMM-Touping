@@ -250,7 +250,8 @@ class SettingsDialog(tb.Toplevel):
         self.v_naming = self._entry(f5, 2, "文件命名模板", s.naming_template, width=30)
         tb.Label(f5, text="可用占位符：{num}序号  {time}时间  {tags}标签  {model}型号  {serial}序列号",
                  bootstyle="secondary", wraplength=380, justify="left").grid(
-                 row=3, column=0, columnspan=3, sticky=W, padx=10, pady=(2, 8))
+                 row=3, column=0, columnspan=3, sticky=W, padx=10, pady=(2, 4))
+        self.v_subfolder = self._switch(f5, 4, "按机器编码分文件夹保存录像 (如 records/01-标签/)", s.subfolder_by_device)
 
         # ---- 通用 ----
         f3 = tb.Frame(nb)
@@ -344,6 +345,7 @@ class SettingsDialog(tb.Toplevel):
         # 存储
         s.records_dir = self.v_dir.get().strip()
         s.naming_template = self.v_naming.get().strip() or "{num}_{time}_{tags}"
+        s.subfolder_by_device = self.v_subfolder.get()
         s.save()
         if self.on_save:
             self.on_save()

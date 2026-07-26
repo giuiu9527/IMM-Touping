@@ -7,6 +7,7 @@ records/
 settings.json
 devices.json
 debug.log
+app.log
 
 # Python
 __pycache__/

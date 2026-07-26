@@ -12,6 +12,9 @@ Windows 桌面工具，用于**多台安卓手机的投屏 / 群控 / 录屏**�
 - 上层：**Python 3.12 + Tkinter + ttkbootstrap（cosmo 亮色主题）+ tkinterdnd2（拖入）**。
 - 仓库：https://github.com/loadingkuu/IMM-Touping （账号 loadingkuu，默认分支 master）。
 - 用户 GitHub 账号：loadingkuu；本机 gh 已登录（有 repo/workflow 权限）。
+- **配套手机端**：AutoX.js 脚本（自动看课 + 触发本软件录制），见下方 **第 10 节**。
+
+> ⚠️ **别再往 PyQt6 迁移**（有人试过，已回退）。教训：PyQt6 的 `createWindowContainer`/`SetParent` 会把 scrcpy 窗口变真子窗口 → **SDL 纯黑**（正是坑#1）；且"子线程里 `QTimer.singleShot`"不触发（QTimer 需所在线程有事件循环），导致接管逻辑不跑、画面飘在软件外。Tkinter 版这些都已趟平，**保持 Tkinter**。
 
 ## 2. 运行
 
@@ -113,8 +116,20 @@ cp -r scrcpy dist/IMM-Touping/scrcpy      # 把引擎放进去
 ## 7. 配置与持久化
 
 - `settings.json`（`config.Settings`）：投屏/录制/存储/窗口记忆等。`load()` 只取已知字段（向前兼容），并跑 `_migrate()`（一次性迁移，如旧 aac→opus）。加新字段直接在 dataclass 加默认值即可。
+- `subfolder_by_device`（默认 True）：开启后视频将自动按机器编码/编号分类落盘到各自独立子目录（如 `records/01-标签/`），防止多设备录像混杂。
 - `devices.json`（`config.DeviceBook`）：每设备的标签(多个)、编号、录制覆盖(record)。
 - 都存在 `config.ROOT`（源码=项目目录，打包=exe 目录）。
+
+## 7.5 本地控制 API（手机 autox.js 自动录制，v0.1.18 新增）
+
+给手机端脚本（autox.js）一个"喊话"电脑的通道，实现**自动开录/停录/OCR后改名归档**。核心在 `app/core/apiserver.py`，接进 `App`（`main_window.py`）。
+
+- **连通**：`adb reverse`。`_sync` 里对每台在线设备起后台线程调 `api.sync(online)`；`ApiServer` 给每台设备分配一个电脑侧唯一端口并执行 `adb -s <serial> reverse tcp:8300 tcp:<pc端口>`。手机脚本永远访问 `127.0.0.1:8300`（**所有手机同一份、写死、零配置**），电脑按"请求到达哪个 pc 端口"反查是哪台设备 → **无需手机上报身份，无伪造问题**。每台设备一个 `ThreadingHTTPServer`（绑 127.0.0.1，只有本机+被 reverse 的那台手机能访问）。
+- **接口**（GET/POST 均可，参数走 query 或 body）：`/ping` `/status`、`/record/start?name=`、`/record/stop?name=`、`/record/rename?name=&folder=&src=`。全部返回 JSON `{ok,...}`。`dispatch` 在 `App._api_dispatch`。
+- **命名**：手机端**直接读无障碍节点拿课名，无需 OCR**。正常路径在**进课前**读目录页列表项 `id=tv_title`（如 `031.…常见公式 .sz`，去掉尾部 ` .sz`），开录时 `start?name=真名` 一步到位、**不留临时名**；读不到才退回结束态读播放页顶栏 `id=title`，`stop?name=` 触发 **stop+改名一步到位**（`api_stop_record` 内部调 `api_rename`）。都读不到才落成临时名 `未命名-NN-时间`。`/record/rename` 保留供手动/归档到子文件夹用（`api_rename` 带去重、路径消毒、跨盘兜底）。当前录制文件按 serial 记在 `self._rec_files`（手动录制也记，改名接口对二者通用）。
+- **线程模型（重要）**：`api_*` 方法跑在 ApiServer 后台线程，只做非 UI 活（起停 scrcpy 子进程、移动文件、读写 `recording/_rec_*`）；动 UI 一律 `root.after(0,...)` 调回主线程（与 `_poll` 既有写法一致）。停录 `stop_record` 会阻塞到干净收尾，放在后台线程里不卡 UI。
+- **开关**：`Settings.api_enabled/api_phone_port(8300)/api_pc_port(8300)`。关掉后 `sync` 会拆掉所有 reverse+监听。`_on_close` 里 `api.stop_all()`。
+- **手机端**（仓库 `gitee.com/iuiu9527/sz` 的 `autox_ui.js`）：`recStart()/recStop()/recRename()` 三个封装；主循环 `netcardProcessor` 里"进入本节课横屏播放→recStart"、"本节课判定播完→recStop（在 finishCourse 前）"，`endProgram/restartCycle` 兜底停录。网络异常全吞，绝不影响看课主流程。改这个文件要 push 到 Gitee 才对所有手机生效（见其项目 README）。
 
 ## 8. 已知限制 / 可做的改进
 
@@ -135,7 +150,40 @@ cp -r scrcpy dist/IMM-Touping/scrcpy      # 把引擎放进去
 | 设置面板/每设备录制/编码器检测 | `app/ui/settings_dialog.py` |
 | 在线更新 | `app/core/updater.py` |
 | 加新功能按钮 | `app/ui/actions.py` + `features.py` |
+| 手机端控制 API（自动录制/改名） | `app/core/apiserver.py` + `App._api_dispatch/api_*`（见 7.5） |
+| 按设备编号/标签分文件夹存录像 | `App._device_records_dir`（`settings.subfolder_by_device`，默认开；设置→存储可关） |
+| 配套手机端 autox.js 脚本 | 见第 10 节 |
 
 ---
 
-**一句话总结给接手的 AI**：这是个"Python 壳 + scrcpy 内核 + Win32 贴窗口"的多设备投屏工具。90% 的坑都在"如何把 scrcpy 原生窗口稳定地嵌进软件、别黑屏别崩溃别错位"和"scrcpy 参数（音频源/编码/鼠标）"上。改这两块前，务必先看第 4 节。
+## 10. 配套手机端项目：AutoX.js 自动看课脚本（"auto 库"）
+
+本软件有一个**配套的手机端项目**：跑在安卓上的 AutoX.js 脚本，自动化操作 App「深造播放器」自动看课，并在**进/出每节课时通过本软件的控制 API 触发录制**。两个项目一个在电脑（本仓库）、一个在手机（下面的 Gitee 仓库），靠 `adb reverse` 联动（见 7.5）。
+
+### 10.1 仓库与文件
+- **仓库**：Gitee **私有** `https://gitee.com/iuiu9527/sz`（分支 `master`）。本机可带令牌克隆/推送（令牌是用户私有，**不要写进任何公开处**）。
+- **主文件 `autox_ui.js`**：全部逻辑 + 设置界面。**权威源**，手机实际拉取的就是它。
+- **热更新加载器 `loader.js`**：打进 APK 当 main.js；启动时用令牌走 Gitee API 拉 `autox_ui.js` 并 `eval` 运行，离线用本地缓存。**改一处=所有手机下次开 App 自动更新，不用重打包。**
+- **版本号**：`autox_ui.js` 顶部 `SCRIPT_VERSION`，显示在界面顶部状态栏右侧。**每次改脚本务必 +**，用户靠它确认手机是否拉到最新。
+- 另有 `项目说明_README.md`（讲自动看课本身的坑）、`更新日志.md`。
+
+### 10.2 更新流程（接手 AI 照做）
+1. 克隆 `iuiu9527/sz`（带令牌），编辑 `autox_ui.js`。
+2. **把 `SCRIPT_VERSION` 往上加一位**（如 `v1.0.0 · 日期-当日第N次`）。
+3. `git commit`（作者用 `iuiu9527 <iuiu9527@gitee.com>`）→ `git push origin master`。
+4. 手机重开 loader 版 App 即拉到最新（顶部版本号可核对）。
+- ⚠️ 仓库私有的原因：`autox_ui.js` 的 `DEFAULTS` 含**明文邮箱授权码/PushPlus 令牌**，绝不能放公开仓库，也别复述这些值。
+
+### 10.3 录制联动（脚本里怎么调本软件）—— 与 7.5 对应
+- 手机脚本封装了 `recCall/recStart/recStop/recRename`（网络异常全吞，绝不影响看课主流程）。
+- 主循环 `netcardProcessor`：进课前在目录页读 `id("tv_title")` 课名 → 进课横屏播放时 `recStart`（用真名直接命名，无需临时名）→ 本节课判定播完、`finishCourse` 前 `recStop`；`endProgram/restartCycle` 兜底停录。
+- **课名直读无障碍节点，无需 OCR**：目录页列表项 `id=tv_title`（如 `031.…公式 .sz`，去掉尾部 ` .sz`），退回播放页顶栏 `id=title`。
+- 电脑侧对应接口/命名/落盘见 **7.5**；录像默认按设备落到 `records/编号-标签/`（`subfolder_by_device`）。
+
+### 10.4 深造 App 关键控件（排查用）
+- 包名 `com.supermedia.mediaplayer`。课名节点 `id=title`(播放页顶栏) / `id=tv_title`(目录列表项)。
+- 结束判定：`rl_control + start 且无 backward_15`（暂停时 backward_15 仍在，靠它区分"暂停/播完"，别删这个复检）。默认结束确认等待 `endWaitSec`=5 秒（老版是 600 秒=10 分钟，已改）。
+
+---
+
+**一句话总结给接手的 AI**：这是个"Python(Tkinter) 壳 + scrcpy 内核 + Win32 贴窗口"的多设备投屏工具，外加一个手机端 AutoX.js 脚本（Gitee `iuiu9527/sz`）自动看课并经 `adb reverse` 触发录制。90% 的坑都在"如何把 scrcpy 原生窗口稳定地嵌进软件、别黑屏别崩溃别错位"和"scrcpy 参数（音频源/编码/鼠标）"上——改这两块前务必先看第 4 节；**别再迁 PyQt6**（见第 1 节警告）。手机端联动看 7.5 + 第 10 节。

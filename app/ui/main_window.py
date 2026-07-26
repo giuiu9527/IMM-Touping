@@ -18,6 +18,7 @@ import webbrowser
 from .. import config
 from ..core.adb import Adb
 from ..core.scrcpy import ScrcpyManager
+from ..core.apiserver import ApiServer
 from ..core import embed, updater
 from ..core.features import all_features
 from . import actions  # noqa: F401  导入即注册内置功能
@@ -291,6 +292,11 @@ class App:
         self.book = config.DeviceBook()
         self.adb = Adb(config.ADB_EXE)
         self.scrcpy = ScrcpyManager(config.SCRCPY_EXE, self.settings)
+        # 本地控制 API（手机端 autox.js 经 adb reverse 调用，自动录制/停止/改名归档）
+        self.api = ApiServer(self.adb, self._api_dispatch,
+                             phone_port=self.settings.api_phone_port,
+                             base_pc_port=self.settings.api_pc_port)
+        self.api.enabled = self.settings.api_enabled
 
         self.root = TkinterDnD.Tk() if _HAS_DND else tk.Tk()
         self.style = tb.Style(THEME)
@@ -344,6 +350,8 @@ class App:
         self.check_vars = {}
         self.tiles = {}
         self.recording = set()          # 正在录制的设备序列号
+        self._rec_files = {}            # serial -> 当前/最近一次录制文件路径（供 API 改名归档）
+        self._rec_ids = {}              # serial -> 本次录制 id（供 API 定位）
         self.solo_windows = {}          # serial -> SoloWindow
         self._rec_labels = []           # REC 指示灯(做呼吸动画)
         self._ratios = {}               # serial -> 屏幕宽/高比例(格子按此贴合)
@@ -406,6 +414,16 @@ class App:
                   ).grid(row=1, column=0, columnspan=2, padx=3, pady=(0, 4), sticky="ew")
         tb.Button(s1, text="刷新", bootstyle="secondary-outline", command=self._poll
                   ).grid(row=1, column=2, padx=3, pady=(0, 4), sticky="ew")
+
+        # 手机导航：发按键给“选中的设备”（没选就发给全部在线）
+        s2 = self._section(left, "手机导航（发给选中设备）")
+        for i, (text, code, name) in enumerate([
+                ("← 返回", KEY_BACK, "返回"),
+                ("● 桌面", KEY_HOME, "桌面"),
+                ("▣ 多任务", KEY_RECENT, "多任务")]):
+            tb.Button(s2, text=text, bootstyle="info-outline",
+                      command=lambda c=code, n=name: self._send_key(c, n)
+                      ).grid(row=0, column=i, padx=3, pady=4, sticky="ew")
 
         s4 = self._section(left, "文件 / 命令")
         for i, f in enumerate(all_features()):
@@ -497,6 +515,8 @@ class App:
             for i, d in enumerate([x for x in devs if x.serial in new]):
                 self.root.after(i * 1800, lambda dev=d: self._embed_device(dev))
         self._known_serials = online
+        # 同步本地控制 API 的 adb reverse/监听（会调 adb，放后台线程避免卡 UI）
+        threading.Thread(target=lambda: self.api.sync(online), daemon=True).start()
         for serial in list(self.recording):
             if serial not in online:      # 设备拔出，scrcpy 会自行收尾录制
                 self.recording.discard(serial)
@@ -890,7 +910,7 @@ class App:
         if self.scrcpy.is_running(device.serial, "solo"):
             self.log(f"独立投屏已在运行: {name}")
             return
-        self.scrcpy.launch_solo(device, name=name)
+        self.scrcpy.launch_solo(device, name=name)   # 原生 scrcpy 独立窗口
         self.log(f"独立投屏: {name}")
 
     def _send_key_one(self, device, code):
@@ -948,6 +968,32 @@ class App:
         """该设备的有效录制参数：有独立设置用自己的，否则用通用设置。"""
         return self.book.record_override(device.serial) or self.settings.record_config()
 
+    def _device_records_dir(self, device_or_serial):
+        """获取该设备的录像保存目录（开启按机器编码分文件夹时，放 records/01-标签/ 下）。"""
+        root = self.settings.effective_records_dir()
+        if not self.settings.subfolder_by_device:
+            return root
+        if isinstance(device_or_serial, str):
+            serial = device_or_serial
+            dev = self._device_by_serial(serial)
+        else:
+            dev = device_or_serial
+            serial = dev.serial if dev else ""
+        if not serial and not dev:
+            return root
+
+        num = self._display_number(dev) if dev else self.book.number(serial, 0)
+        num_str = f"{num:02d}" if num else "00"
+        tags = self.book.tags(serial) if serial else []
+        if tags:
+            tag_str = self._safe_name(tags[0])
+            folder_name = f"{num_str}-{tag_str}" if tag_str else num_str
+        else:
+            folder_name = num_str
+        sub_dir = os.path.join(root, self._safe_name(folder_name))
+        os.makedirs(sub_dir, exist_ok=True)
+        return sub_dir
+
     def _record_path(self, device, rec):
         s = self.settings
         num = self._display_number(device)
@@ -967,8 +1013,7 @@ class App:
         except Exception:      # 模板写错就退回默认
             name = f"Recording-{tokens['num2']}-{tokens['firsttag']}-{tokens['time']}"
         name = self._safe_name(name) or "record"
-        d = s.effective_records_dir()
-        os.makedirs(d, exist_ok=True)
+        d = self._device_records_dir(device)
         return os.path.join(d, f"{name}.{rec.get('fmt', 'mp4')}")
 
     def _do_start_record(self, device):
@@ -977,6 +1022,8 @@ class App:
         path = self._record_path(device, rec)
         if self.scrcpy.start_record(device, path, rec):
             self.recording.add(device.serial)
+            self._rec_files[device.serial] = path
+            self._rec_ids[device.serial] = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3]
             self.log(f"● 开始录制: {name}")
             self._refresh_rec_ui(device.serial)
 
@@ -1041,6 +1088,118 @@ class App:
         except Exception as e:
             self.log(f"打开文件夹失败: {e}")
 
+    # ---------------- 本地控制 API（手机端 autox.js 调用） ----------------
+    # 说明：以下方法运行在 ApiServer 的后台线程里（非 Tk 主线程）。
+    #   - 只做“非 UI”的活（起停 scrcpy 子进程、移动文件、读写 self.recording/_rec_* 字典）；
+    #   - 需要动 UI 的一律用 self.root.after(0, ...) 调回主线程（与 _poll 的既有写法一致）。
+    def _device_by_serial(self, serial):
+        for d in self.devices:
+            if d.serial == serial:
+                return d
+        return None
+
+    def _api_record_path(self, device, rec, name=""):
+        """API 录制的落盘路径。name 留空时用临时名（待 OCR 识别后再改名归档）。"""
+        d = self._device_records_dir(device)
+        ext = rec.get("fmt", "mp4")
+        if name:
+            base = self._safe_name(name)
+        else:
+            num = self._display_number(device)
+            ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+            base = f"未命名-{num:02d}-{ts}"       # 临时名，/record/rename 时再改
+        return os.path.join(d, f"{base}.{ext}")
+
+    def _api_dispatch(self, serial, action, params):
+        """ApiServer 的统一入口：serial 由“请求到达哪个端口”反查得到，可信。"""
+        if action in ("", "ping"):
+            return {"ok": True, "serial": serial,
+                    "app": config.APP_NAME, "version": config.APP_VERSION,
+                    "recording": serial in self.recording}
+        if action == "status":
+            return {"ok": True, "recording": serial in self.recording,
+                    "id": self._rec_ids.get(serial, ""),
+                    "file": self._rec_files.get(serial, "")}
+        if action == "record/start":
+            return self.api_start_record(serial, params.get("name", ""))
+        if action == "record/stop":
+            return self.api_stop_record(serial, params.get("name", ""))
+        if action == "record/rename":
+            return self.api_rename(serial, params.get("name", ""),
+                                   params.get("folder", ""),
+                                   params.get("src", "") or params.get("id", ""))
+        return {"ok": False, "error": "未知接口: " + action}
+
+    def api_start_record(self, serial, name=""):
+        dev = self._device_by_serial(serial)
+        if not dev or not dev.is_online:
+            return {"ok": False, "error": "设备不在线"}
+        if serial in self.recording:
+            return {"ok": False, "error": "已在录制中",
+                    "id": self._rec_ids.get(serial, ""),
+                    "file": self._rec_files.get(serial, "")}
+        rec = self._record_config(dev)
+        path = self._api_record_path(dev, rec, name)
+        if not self.scrcpy.start_record(dev, path, rec):
+            return {"ok": False, "error": "启动录制失败"}
+        rid = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3]
+        self.recording.add(serial)
+        self._rec_files[serial] = path
+        self._rec_ids[serial] = rid
+        self.root.after(0, lambda: (self.log(f"● [API] 开始录制 {os.path.basename(path)}"),
+                                    self._refresh_rec_ui(serial)))
+        return {"ok": True, "id": rid, "file": path}
+
+    def api_stop_record(self, serial, name=""):
+        if serial not in self.recording:
+            return {"ok": False, "error": "当前未在录制",
+                    "id": self._rec_ids.get(serial, ""),
+                    "file": self._rec_files.get(serial, "")}
+        self.scrcpy.stop_record(serial)          # 阻塞直到干净收尾（保证文件可播放）
+        self.recording.discard(serial)
+        path = self._rec_files.get(serial, "")
+        rid = self._rec_ids.get(serial, "")
+        self.root.after(0, lambda: (self.log(f"■ [API] 已保存 {os.path.basename(path)}"),
+                                    self._refresh_rec_ui(serial)))
+        result = {"ok": True, "id": rid, "file": path}
+        if name:                                 # 停录时就带了名字 = stop + rename 一步到位
+            rn = self.api_rename(serial, name, "", path)
+            if rn.get("ok"):
+                result["file"] = rn["file"]
+            else:
+                result["rename_error"] = rn.get("error", "")
+        return result
+
+    def api_rename(self, serial, name="", folder="", src=""):
+        """改名并（可选）归档到 records 下的子文件夹。供 OCR 识别出内容后回调。"""
+        if serial in self.recording:
+            return {"ok": False, "error": "仍在录制，请先停止"}
+        if not name:
+            return {"ok": False, "error": "name 不能为空"}
+        path = src or self._rec_files.get(serial, "")
+        if not path or not os.path.exists(path):
+            return {"ok": False, "error": "找不到录制文件"}
+        dev = self._device_by_serial(serial)
+        dev_dir = self._device_records_dir(dev or serial)
+        target_dir = os.path.join(dev_dir, self._safe_name(folder)) if folder else dev_dir
+        os.makedirs(target_dir, exist_ok=True)
+        ext = os.path.splitext(path)[1]
+        stem = self._safe_name(name)
+        newpath = os.path.join(target_dir, stem + ext)
+        i = 1
+        while os.path.exists(newpath) and os.path.abspath(newpath) != os.path.abspath(path):
+            newpath = os.path.join(target_dir, f"{stem}-{i}{ext}")
+            i += 1
+        try:
+            os.replace(path, newpath)            # 同盘=改名/移动
+        except OSError:
+            import shutil                         # 跨盘兜底
+            shutil.move(path, newpath)
+        if self._rec_files.get(serial) == path:
+            self._rec_files[serial] = newpath
+        self.root.after(0, lambda: self.log(f"✎ [API] 归档 {os.path.basename(newpath)}"))
+        return {"ok": True, "file": newpath}
+
     # ---------------- 其它 ----------------
     def _encoder_options(self, force=False):
         """检测在线设备支持的视频编码器（带缓存，避免每次都查）。"""
@@ -1084,6 +1243,10 @@ class App:
                 self.settings.window_maximized = False
                 self.settings.window_geometry = self.root.geometry()
             self.settings.save()
+        except Exception:
+            pass
+        try:
+            self.api.stop_all()
         except Exception:
             pass
         self.scrcpy.stop_all()

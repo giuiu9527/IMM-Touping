@@ -74,6 +74,22 @@ class Adb:
         code, out = self._run(["reboot"], serial=serial, timeout=15)
         return code == 0, out.strip()
 
+    def reverse(self, serial: str, remote_port: int, local_port: int) -> Tuple[bool, str]:
+        """adb reverse：手机侧 localhost:remote_port -> 电脑侧 localhost:local_port。
+
+        供手机端 autox.js 直接访问 127.0.0.1:remote_port 就能打到电脑上的控制 API，
+        走 USB、无需局域网/IP，也无需手机上报身份（电脑按 local_port 反查设备）。
+        """
+        code, out = self._run(["reverse", f"tcp:{remote_port}", f"tcp:{local_port}"],
+                              serial=serial, timeout=10)
+        return code == 0, out.strip()
+
+    def reverse_remove(self, serial: str, remote_port: int) -> Tuple[bool, str]:
+        """移除某设备的一条 reverse 映射（设备掉线/退出时清理）。"""
+        code, out = self._run(["reverse", "--remove", f"tcp:{remote_port}"],
+                              serial=serial, timeout=10)
+        return code == 0, out.strip()
+
     def get_resolution(self, serial: str):
         """返回 (宽, 高) 物理分辨率，失败返回 None。"""
         code, out = self._run(["shell", "wm", "size"], serial=serial, timeout=8)

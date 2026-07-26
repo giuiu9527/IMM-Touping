@@ -24,7 +24,7 @@ ICON_ICO = os.path.join(_APP_DIR, "imm.ico")
 ICON_PNG = os.path.join(_APP_DIR, "imm.png")
 # 应用信息
 APP_NAME = "IMM投屏"
-APP_VERSION = "0.1.17"
+APP_VERSION = "0.1.18"
 GITHUB_OWNER = "loadingkuu"
 GITHUB_REPO = "IMM-Touping"          # 仓库名，发布时确认
 
@@ -98,6 +98,12 @@ class Settings:
     # 存储设置
     records_dir: str = ""                # 录屏保存目录，空=默认 records/
     naming_template: str = "Recording-{num2}-{firsttag}-{time}"   # 文件命名模板
+    subfolder_by_device: bool = True     # 是否按机器编码/编号独立保存到子文件夹（如 records/01-标签/）
+
+    # 本地控制 API（供手机端 autox.js 通过 adb reverse 调用，自动录制/停止/改名归档）
+    api_enabled: bool = True             # 是否开启本地控制 API
+    api_phone_port: int = 8300           # 手机侧固定端口（脚本写死 127.0.0.1:该端口）
+    api_pc_port: int = 8300              # 电脑侧起始端口，每台设备顺延分配一个专属端口
 
     # 窗口记忆
     window_geometry: str = ""            # 上次窗口大小/位置，如 1160x740+100+50
