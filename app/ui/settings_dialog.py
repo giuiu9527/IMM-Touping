@@ -258,6 +258,11 @@ class SettingsDialog(tb.Toplevel):
         nb.add(f3, text="  通用  ")
         self.v_screenoff = self._switch(f3, 0, "自动息屏（投屏时关闭手机屏幕）", s.auto_screen_off)
         self.v_automir = self._switch(f3, 1, "自动投屏（设备连上就自动嵌入网格）", s.auto_mirror)
+        self.v_api = self._switch(f3, 2, "手机控制API（autox.js 自动录制/停止/改名，走 adb reverse）", s.api_enabled)
+        self.v_apiport = self._entry(f3, 3, "手机端口（脚本里写死此端口，默认 8300）", s.api_phone_port, width=8)
+        tb.Label(f3, text="开启后设备连上即自动挂好接口，无需配置；效果看主界面日志的 [API] 行。",
+                 bootstyle="secondary", wraplength=380, justify="left").grid(
+                 row=4, column=0, columnspan=3, sticky=W, padx=10, pady=(0, 4))
 
         bar = tb.Frame(self)
         bar.pack(fill=X, padx=12, pady=(0, 12))
@@ -332,6 +337,8 @@ class SettingsDialog(tb.Toplevel):
         s.direct_control = self.v_direct.get()
         s.auto_screen_off = self.v_screenoff.get()
         s.auto_mirror = self.v_automir.get()
+        s.api_enabled = self.v_api.get()
+        s.api_phone_port = self._to_int(self.v_apiport.get(), 8300)
         # 录制
         s.record_max_size = config.maxsize_to_int(self.v_rec_size.get())
         s.record_bitrate_mbps = self._to_float(self.v_rec_bitrate.get(), 8.0)

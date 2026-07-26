@@ -1219,6 +1219,15 @@ class App:
         def _saved():
             self.log("设置已保存")
             self._apply_tile_size()
+            # 让手机控制API的开关/端口改动立即生效（端口变了要重挂 reverse）
+            self.api.enabled = self.settings.api_enabled
+            self.api.phone_port = self.settings.api_phone_port
+            online = {d.serial for d in self.devices if d.is_online}
+
+            def _rebuild_api():
+                self.api.stop_all()
+                self.api.sync(online)
+            threading.Thread(target=_rebuild_api, daemon=True).start()
         SettingsDialog(self.root, self.settings, on_save=_saved,
                        list_encoders=lambda: self._encoder_options(False),
                        refresh_encoders=lambda: self._encoder_options(True))
