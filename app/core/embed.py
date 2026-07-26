@@ -98,6 +98,13 @@ def place(child_hwnd, x, y, w, h):
                             SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOZORDER)
 
 
+def raise_over(child_hwnd, x, y, w, h):
+    """提到最前并定位(会改层级)。用于接管前先把画面显示出来，避免黑屏等待。"""
+    if w > 0 and h > 0:
+        user32.SetWindowPos(child_hwnd, 0, int(x), int(y), int(w), int(h),
+                            SWP_NOACTIVATE | SWP_SHOWWINDOW)   # HWND_TOP，抬到最前
+
+
 user32.BeginDeferWindowPos.restype = ctypes.c_void_p
 user32.BeginDeferWindowPos.argtypes = [ctypes.c_int]
 user32.DeferWindowPos.restype = ctypes.c_void_p

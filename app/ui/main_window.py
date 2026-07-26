@@ -218,9 +218,18 @@ class SoloWindow(tb.Toplevel):
 
         def find():
             h = embed.find_hwnd_by_title(title)
-            time.sleep(1.2)
+            if h:                                   # 一出现就先把画面提到最前显示，别等接管
+                self.after(0, lambda: self._show_early(h))
+            time.sleep(1.0)
             self.after(0, lambda: self._attach(h))
         threading.Thread(target=find, daemon=True).start()
+
+    def _show_early(self, h):
+        if not (h and self.winfo_exists() and self.video.winfo_ismapped()):
+            return
+        v = self.video
+        embed.raise_over(h, v.winfo_rootx(), v.winfo_rooty(),
+                         v.winfo_width(), v.winfo_height())
 
     def _attach(self, h):
         if not h or not self.winfo_exists():
