@@ -293,6 +293,8 @@ class App:
         self._rec_labels = []           # REC 指示灯(做呼吸动画)
         self._ratios = {}               # serial -> 屏幕宽/高比例(格子按此贴合)
         self._numbers = {}              # serial -> 显示编号(连续不重复)
+        self._models = {}               # serial -> 型号(缓存，避免每次轮询都查)
+        self._list_sig = None           # 列表内容签名，用于避免无变化时重建(防闪)
         self._encoder_cache = []        # 编码器检测缓存
         self._known_serials = set()
         self._last_cols = 0
@@ -404,8 +406,13 @@ class App:
         def worker():
             devs = self.adb.list_devices()
             for d in devs:
-                if d.is_online and not d.model:
-                    d.model = self.adb.get_model(d.serial)
+                if d.is_online:
+                    if d.serial in self._models:          # 用缓存，避免每次轮询都查
+                        d.model = self._models[d.serial]
+                    elif not d.model:
+                        d.model = self.adb.get_model(d.serial)
+                        if d.model:
+                            self._models[d.serial] = d.model
             self.root.after(0, lambda: self._sync(devs))
         threading.Thread(target=worker, daemon=True).start()
         self.root.after(4000, self._poll)
@@ -441,7 +448,15 @@ class App:
         for serial in list(self.tiles.keys()):
             if serial not in online:
                 self._remove_tile(serial)
-        self._render_list(devs)
+        # 仅在列表内容真正变化时才重建，避免每次轮询闪烁
+        sig = tuple((d.serial, d.state, self._numbers.get(d.serial),
+                     d.serial in self.recording, tuple(self._device_tags(d)))
+                    for d in devs)
+        if sig != self._list_sig:
+            self._list_sig = sig
+            self._render_list(devs)
+        else:
+            self._update_status()
         self._reflow()
 
     # ---------------- 标签 ----------------
@@ -481,7 +496,8 @@ class App:
             row.pack(fill=X, pady=2, padx=2)
             var = self.check_vars.get(d.serial, tk.BooleanVar())
             new_vars[d.serial] = var
-            tb.Checkbutton(row, variable=var, bootstyle="round-toggle").pack(side=LEFT, padx=(2, 4))
+            tb.Checkbutton(row, variable=var, bootstyle="round-toggle",
+                           command=self._update_status).pack(side=LEFT, padx=(2, 4))
             tb.Label(row, text=f"{num:02d}", width=2, bootstyle="info").pack(side=LEFT)
             self._render_tag_chips(
                 row, self._device_tags(d),
@@ -498,7 +514,10 @@ class App:
             # 右键菜单（整行含子控件都能触发）
             bind_recursive(row, "<Button-3>", lambda e, dev=d: self._device_menu(e, dev))
         self.check_vars = new_vars
-        self.status.config(text=f" 总数 {len(devs)}   在线 {len(self._known_serials)}   "
+        self._update_status()
+
+    def _update_status(self):
+        self.status.config(text=f" 总数 {len(self.devices)}   在线 {len(self._known_serials)}   "
                                 f"投屏 {len(self.tiles)}   已选 {len(self.selected_devices())}")
 
     def _edit_device(self, device):
