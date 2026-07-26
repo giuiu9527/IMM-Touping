@@ -13,7 +13,7 @@ import subprocess
 import urllib.request
 
 _UA = {"User-Agent": "IMM-Touping-Updater", "Accept": "application/vnd.github+json"}
-_DETACHED = 0x00000008 | 0x00000200      # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+_NEW_CONSOLE = 0x00000010 | 0x00000200   # CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP
 
 
 def _ver_tuple(v):
@@ -83,18 +83,19 @@ def apply_update(zip_path, install_dir, exe_name):
 
     bat_path = os.path.join(tempfile.gettempdir(), "imm_apply_update.bat")
     bat = f"""@echo off
+title 正在更新 IMM投屏
+echo.
+echo    正在更新到新版本，请稍候...
+echo    完成后会自动重启，请勿关闭本窗口。
+echo.
 ping -n 3 127.0.0.1 >nul
-:wait
-tasklist /FI "IMAGENAME eq {exe_name}" | find /I "{exe_name}" >nul
-if not errorlevel 1 (
-  ping -n 2 127.0.0.1 >nul
-  goto wait
-)
+taskkill /F /IM "{exe_name}" >nul 2>&1
+ping -n 2 127.0.0.1 >nul
 xcopy /E /Y /I "{src}\\*" "{install_dir}\\" >nul
 start "" "{os.path.join(install_dir, exe_name)}"
 rmdir /S /Q "{staging}" >nul 2>&1
-del "%~f0" >nul 2>&1
+(goto) 2>nul & del "%~f0"
 """
     with open(bat_path, "w", encoding="gbk", errors="replace") as f:
         f.write(bat)
-    subprocess.Popen(["cmd", "/c", bat_path], creationflags=_DETACHED, close_fds=True)
+    subprocess.Popen(["cmd", "/c", bat_path], creationflags=_NEW_CONSOLE, close_fds=True)
