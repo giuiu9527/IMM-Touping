@@ -195,7 +195,8 @@ class SoloWindow(tb.Toplevel):
         name = app.book.name(device.serial, device.model or device.serial)
         self.title(f"独立 · {name}")
         w = app.settings.solo_window_size
-        self.geometry(f"{w + 24}x{int(w * 1.9) + 56}")
+        ratio = app._ratios.get(device.serial) or 0.462   # 按手机真实比例，减少黑边
+        self.geometry(f"{w + 24}x{int(w / ratio) + 56}")
         center_window(self)
         self.protocol("WM_DELETE_WINDOW", self._close)
 
@@ -731,9 +732,10 @@ class App:
         embed.set_owner(hwnd, self._owner_hwnd())
         tile["hwnd"] = hwnd
         self._position_overlay(serial)
-        # 触发 SDL 重绘，避免偶发黑屏
-        self.root.after(300, lambda: self._nudge_overlay(serial, 2))
-        self.root.after(500, lambda: self._nudge_overlay(serial, 0))
+        # 多次触发 SDL 重绘，尽量避免偶发黑屏(慢的设备需要更多次)
+        for i, t in enumerate((300, 600, 1200, 2000, 3200)):
+            self.root.after(t, lambda s=serial, dh=(2 if i % 2 == 0 else 0):
+                            self._nudge_overlay(s, dh))
 
     def _nudge_overlay(self, serial, dh):
         tile = self.tiles.get(serial)

@@ -135,6 +135,8 @@ class ScrcpyManager:
             cmd += ["--max-size", str(max_size)]
         if self.settings.auto_screen_off:
             cmd.append("--turn-screen-off")
+        # 不转发鼠标悬停(仅移动不点击)：避免鼠标划过就误操作手机
+        cmd.append("--no-mouse-hover")
         return cmd
 
     def _spawn(self, key: tuple, cmd: List[str]):
@@ -169,7 +171,7 @@ class ScrcpyManager:
         w = s.group_window_size
         h = int(w * 1.9)
         cmd = self._build_base(device.serial, s.group_resolution, s.group_fluidity, title)
-        cmd += ["--window-borderless",
+        cmd += ["--window-borderless", "--no-audio",   # 群控不播放/不占用声音
                 "--window-x", "-3000", "--window-y", "-3000",
                 "--window-width", str(w), "--window-height", str(h)]
         if not s.direct_control:
