@@ -158,9 +158,14 @@ class ScrcpyManager:
         display = name or device.display_name
         cmd = self._build_base(device.serial, s.solo_resolution, s.solo_fluidity,
                                f"独立 · {display}")
-        cmd += ["--window-width", str(w), "--window-height", str(h)]
-        # 不用 _NO_WINDOW：让 scrcpy 以原生窗口显示，渲染最稳定
-        self._procs[key] = subprocess.Popen(cmd)
+        cmd += [
+            "--window-width", str(w),
+            "--window-height", str(h),
+            "--audio-source", "playback",       # 使用 playback 避免 output 默认源 -33dB 声音衰减
+            "--audio-codec", "opus",           # opus 格式响度更佳
+        ]
+        # creationflags=_NO_WINDOW：隐藏黑色的 CMD 控制台终端窗口，只留下 scrcpy 原生画面窗口
+        self._procs[key] = subprocess.Popen(cmd, creationflags=_NO_WINDOW)
 
     # ---------- 群控窗口（嵌入软件网格） ----------
     def start_embed_process(self, device):
