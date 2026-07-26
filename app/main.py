@@ -14,12 +14,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def _enable_dpi():
-    """开启 PerMonitorV2 高 DPI 感知：4K/高缩放屏字体清晰。
-
-    必须用 PMv2（context = -4）：它支持“高感知窗口托管低感知子窗口”，
-    会自动缩放被托管的 scrcpy 画面而不销毁它；老的 PM v1 / 系统感知会杀掉
-    被 set_owner 的 scrcpy 悬浮窗口，导致群控黑屏/消失。
-    """
+    """开启 PerMonitorV2 高 DPI 感知，并注册 AppUserModelID 保证任务栏图标清晰。"""
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("loadingkuu.imm_touping.app.v0")
+    except Exception:
+        pass
     try:
         if ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
             return

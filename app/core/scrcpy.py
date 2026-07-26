@@ -147,14 +147,20 @@ class ScrcpyManager:
         self._procs[key] = subprocess.Popen(cmd, creationflags=_NO_WINDOW)
 
     # ---------- 独立窗口 ----------
-    def launch_solo(self, device):
+    def launch_solo(self, device, name: str = None):
         s = self.settings
+        key = (device.serial, "solo")
+        self._cleanup()
+        if key in self._procs:
+            return
         w = s.solo_window_size
         h = int(w * 1.9)  # 竖屏手机大致比例，scrcpy 会按真实比例自适应
+        display = name or device.display_name
         cmd = self._build_base(device.serial, s.solo_resolution, s.solo_fluidity,
-                               f"[独立] {device.display_name}")
+                               f"独立 · {display}")
         cmd += ["--window-width", str(w), "--window-height", str(h)]
-        self._spawn((device.serial, "solo"), cmd)
+        # 不用 _NO_WINDOW：让 scrcpy 以原生窗口显示，渲染最稳定
+        self._procs[key] = subprocess.Popen(cmd)
 
     # ---------- 群控窗口（嵌入软件网格） ----------
     def start_embed_process(self, device):

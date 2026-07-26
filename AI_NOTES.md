@@ -57,7 +57,7 @@ settings.json/devices.json/records/  # 运行时生成（gitignore）
 - **接管时机**：找到 scrcpy 窗口后要**等一会儿再 set_owner**（太早接管会崩），且多台设备要**错开逐台启动**（`_sync` 里 `after(i*1800, ...)`），同时启动会互相抢占崩溃。
 - **格子尺寸必须按手机真实屏幕比例**：scrcpy 会把窗口自动调成手机画面比例，若格子比例不对就会错位/留黑边。见 `_tile_dims`/`_ratios`（用 `adb.get_resolution`）。
 - **偶发黑屏**：scrcpy 在屏外/被遮挡时 SDL 会暂停渲染，搬进来后不一定立刻重绘。对策：`_nudge_overlay` 改 1px 尺寸多次触发 WM_SIZE 唤醒重绘（群控 `_attach` 里 300~3200ms 分 5 次）。
-- **独立窗口打开黑屏几秒**：因为接管延迟期间画面被黑框盖住。对策：窗口一出现先 `embed.raise_over`（提到最前显示），接管再延迟做（见 `SoloWindow._show_early`）。独立窗口 scrcpy 是**直接在目标屏幕位置启动**（不离屏），也是为了少黑屏。
+- **独立投屏**：独立投屏已切回原生 scrcpy 窗口（`launch_solo`），不进行 Win32 嵌套/`set_owner`，彻底解决部分设备挪动窗口黑屏的问题，渲染最稳定流畅。
 
 ### 坑#2 —— 录制声音过小（花了两版才定位）
 - **不是编码问题**（aac/opus 都试过）。真凶是**音频源**：scrcpy 默认 `--audio-source=output`(REMOTE_SUBMIX) 在部分机型(如 OnePlus LE2100)被衰减约 **33dB**（实测 RMS -59 vs escrcpy -26 dBFS）。

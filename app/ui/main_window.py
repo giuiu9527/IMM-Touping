@@ -186,12 +186,18 @@ class UpdateDialog(tb.Toplevel):
 
 
 class SoloWindow(tb.Toplevel):
-    """独立投屏窗口：顶部手势导航按钮 + 嵌入的 scrcpy 画面。"""
+    """独立投屏窗口：顶部手势导航按钮 + scrcpy 画面浮在上方。
+
+    不使用 set_owner（会导致某些设备上 SDL 渲染变黑），
+    改为让 scrcpy 窗口作为独立顶层窗口浮在 video 区域上方，
+    通过 <Configure>/<FocusIn>/<Map>/<Unmap> 事件同步位置和可见性。
+    """
     def __init__(self, app, device):
         super().__init__(app.root)
         self.app = app
         self.device = device
         self.hwnd = None
+        self._minimized = False
         name = app.book.name(device.serial, device.model or device.serial)
         self.title(f"独立 · {name}")
         w = app.settings.solo_window_size
@@ -204,13 +210,16 @@ class SoloWindow(tb.Toplevel):
         bar.pack(fill=X, pady=2)
         for text, code in [("← 返回", KEY_BACK), ("● 桌面", KEY_HOME), ("▣ 多任务", KEY_RECENT)]:
             tb.Button(bar, text=text, bootstyle="info-outline",
-                      command=lambda c=code: app._send_key_one(device, c)).pack(side=LEFT, padx=3, pady=2)
+                      command=lambda c=code: self._on_nav(c)).pack(side=LEFT, padx=3, pady=2)
 
         self.video = tk.Frame(self, bg="black")
         self.video.pack(fill=BOTH, expand=True)
-        self.bind("<Configure>", self._reposition)
+        self.bind("<Configure>", self._on_configure)
+        self.bind("<FocusIn>", self._on_focus)
+        self.bind("<Map>", self._on_map)
+        self.bind("<Unmap>", self._on_unmap)
 
-        # 直接在视频区所在屏幕位置启动 scrcpy，避免离屏导致 SDL 黑屏
+        # 直接在视频区所在屏幕位置启动 scrcpy
         self.update_idletasks()
         vx, vy = self.video.winfo_rootx(), self.video.winfo_rooty()
         vw, vh = self.video.winfo_width(), self.video.winfo_height()
@@ -218,44 +227,59 @@ class SoloWindow(tb.Toplevel):
 
         def find():
             h = embed.find_hwnd_by_title(title)
-            if h:                                   # 一出现就先把画面提到最前显示，别等接管
-                self.after(0, lambda: self._show_early(h))
-            time.sleep(1.0)
+            if not h:
+                return
+            time.sleep(0.3)          # 等 SDL 初始化
             self.after(0, lambda: self._attach(h))
         threading.Thread(target=find, daemon=True).start()
-
-    def _show_early(self, h):
-        if not (h and self.winfo_exists() and self.video.winfo_ismapped()):
-            return
-        v = self.video
-        embed.raise_over(h, v.winfo_rootx(), v.winfo_rooty(),
-                         v.winfo_width(), v.winfo_height())
 
     def _attach(self, h):
         if not h or not self.winfo_exists():
             return
-        embed.set_owner(h, embed.root_hwnd(int(self.winfo_id())))
         self.hwnd = h
-        self._reposition()
-        # 主动触发 SDL 重绘（改 1px 尺寸再还原），修复偶发黑屏
-        self.after(250, lambda: self._nudge(2))
-        self.after(500, lambda: self._nudge(0))
-        self.after(1200, lambda: self._nudge(2))
-        self.after(1400, lambda: self._nudge(0))
+        # 不调 set_owner —— 直接把 scrcpy 窗口 raise 到 video 区域上方
+        self._raise_to_video()
 
-    def _nudge(self, dh):
+    def _raise_to_video(self):
+        """把 scrcpy 窗口提到最前，精确覆盖 video 区域。"""
         if not (self.hwnd and self.winfo_exists() and self.video.winfo_ismapped()):
             return
         v = self.video
-        embed.place(self.hwnd, v.winfo_rootx(), v.winfo_rooty(),
-                    v.winfo_width(), v.winfo_height() + dh)
+        embed.raise_over(self.hwnd, v.winfo_rootx(), v.winfo_rooty(),
+                         v.winfo_width(), v.winfo_height())
 
-    def _reposition(self, _=None):
-        if self.hwnd and self.video.winfo_ismapped():
-            embed.place(self.hwnd, self.video.winfo_rootx(), self.video.winfo_rooty(),
-                        self.video.winfo_width(), self.video.winfo_height())
+    def _on_configure(self, _=None):
+        """窗口移动/调整大小时，同步 scrcpy 位置。"""
+        if self.hwnd and not self._minimized:
+            # 防抖：用 after_idle 合并高频事件
+            self.after_idle(self._raise_to_video)
+
+    def _on_focus(self, _=None):
+        """点击导航按钮等操作后，独立窗口获得焦点，需要把 scrcpy 重新提到上方。"""
+        if self.hwnd and not self._minimized:
+            self.after(30, self._raise_to_video)
+
+    def _on_nav(self, keycode):
+        """导航按钮回调：先发按键，再把 scrcpy 提回最前。"""
+        self.app._send_key_one(self.device, keycode)
+        if self.hwnd:
+            self.after(80, self._raise_to_video)
+
+    def _on_unmap(self, _=None):
+        """独立窗口最小化时，一起隐藏 scrcpy。"""
+        self._minimized = True
+        if self.hwnd:
+            embed.user32.ShowWindow(self.hwnd, 0)      # SW_HIDE
+
+    def _on_map(self, _=None):
+        """独立窗口恢复时，重新显示并定位 scrcpy。"""
+        self._minimized = False
+        if self.hwnd:
+            embed.user32.ShowWindow(self.hwnd, embed.SW_SHOWNOACTIVATE)
+            self.after(50, self._raise_to_video)
 
     def _close(self):
+        self.hwnd = None                               # 先置空，阻止事件回调
         self.app.scrcpy.stop(self.device.serial, "solo")
         self.app.solo_windows.pop(self.device.serial, None)
         self.destroy()
@@ -851,13 +875,12 @@ class App:
         if not device.is_online:
             messagebox.showwarning("投屏", f"{device.display_name} 不在线")
             return
-        win = self.solo_windows.get(device.serial)
-        if win and win.winfo_exists():      # 已开就置前
-            win.lift()
-            win.focus_force()
+        name = self.book.name(device.serial, device.display_name)
+        if self.scrcpy.is_running(device.serial, "solo"):
+            self.log(f"独立投屏已在运行: {name}")
             return
-        self.solo_windows[device.serial] = SoloWindow(self, device)
-        self.log(f"独立投屏: {self.book.name(device.serial, device.display_name)}")
+        self.scrcpy.launch_solo(device, name=name)
+        self.log(f"独立投屏: {name}")
 
     def _send_key_one(self, device, code):
         threading.Thread(target=lambda: self.adb.shell(device.serial, f"input keyevent {code}"),
