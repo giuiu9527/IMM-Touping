@@ -20,7 +20,7 @@ SCRCPY_EXE = os.path.join(SCRCPY_DIR, "scrcpy.exe")
 ADB_EXE = os.path.join(SCRCPY_DIR, "adb.exe")
 # 应用信息
 APP_NAME = "IMM投屏"
-APP_VERSION = "0.1.9"
+APP_VERSION = "0.1.10"
 GITHUB_OWNER = "loadingkuu"
 GITHUB_REPO = "IMM-Touping"          # 仓库名，发布时确认
 

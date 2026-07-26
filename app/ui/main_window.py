@@ -302,7 +302,7 @@ class App:
         os.makedirs(config.RECORDS_DIR, exist_ok=True)
 
         self._build_ui()
-        self.root.bind("<Configure>", self._position_all_overlays)
+        self.root.bind("<Configure>", self._on_configure)
         if _HAS_DND:
             self.root.drop_target_register(DND_FILES)
             self.root.dnd_bind("<<Drop>>", self._on_drop)
@@ -759,9 +759,26 @@ class App:
         embed.place(tile["hwnd"], v.winfo_rootx(), v.winfo_rooty(),
                     v.winfo_width(), v.winfo_height())
 
+    def _on_configure(self, _event=None):
+        # 防抖：拖动时 <Configure> 每秒触发几十次，合并到约 60fps，避免卡顿
+        if getattr(self, "_repos_pending", False):
+            return
+        self._repos_pending = True
+        self.root.after(16, self._flush_overlays)
+
+    def _flush_overlays(self):
+        self._repos_pending = False
+        self._position_all_overlays()
+
     def _position_all_overlays(self, _event=None):
-        for serial in self.tiles:
-            self._position_overlay(serial)
+        # 一次性批量移动所有画面窗口，拖动更跟手、不闪
+        items = []
+        for tile in self.tiles.values():
+            v = tile.get("video")
+            if tile.get("hwnd") and v and v.winfo_ismapped():
+                items.append((tile["hwnd"], v.winfo_rootx(), v.winfo_rooty(),
+                              v.winfo_width(), v.winfo_height()))
+        embed.batch_place(items)
 
     def _update_tile_header(self, serial):
         tile = self.tiles.get(serial)

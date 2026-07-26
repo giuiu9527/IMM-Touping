@@ -98,5 +98,32 @@ def place(child_hwnd, x, y, w, h):
                             SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOZORDER)
 
 
+user32.BeginDeferWindowPos.restype = ctypes.c_void_p
+user32.BeginDeferWindowPos.argtypes = [ctypes.c_int]
+user32.DeferWindowPos.restype = ctypes.c_void_p
+user32.DeferWindowPos.argtypes = [ctypes.c_void_p, wintypes.HWND, wintypes.HWND,
+                                  ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                  ctypes.c_uint]
+user32.EndDeferWindowPos.argtypes = [ctypes.c_void_p]
+
+
+def batch_place(items):
+    """一次性(原子)定位多个窗口，拖动时更跟手、不闪。items=[(hwnd,x,y,w,h),...]"""
+    items = [it for it in items if it[0] and it[3] > 0 and it[4] > 0]
+    if not items:
+        return
+    hdwp = user32.BeginDeferWindowPos(len(items))
+    if not hdwp:
+        for h, x, y, w, ht in items:
+            place(h, x, y, w, ht)
+        return
+    flags = SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOZORDER
+    for h, x, y, w, ht in items:
+        hdwp = user32.DeferWindowPos(hdwp, h, None, int(x), int(y), int(w), int(ht), flags)
+        if not hdwp:
+            return
+    user32.EndDeferWindowPos(hdwp)
+
+
 def close(child_hwnd):
     user32.PostMessageW(child_hwnd, WM_CLOSE, 0, 0)
