@@ -100,6 +100,15 @@ class ScrcpyManager:
             "--window-width", "240", "--window-height", "480",
         ]
         self._procs[key] = subprocess.Popen(cmd, creationflags=_NO_WINDOW)
+        # 后台把这个隐藏的录制窗口从任务栏移除（否则会留一个绿色 scrcpy 图标）
+        import threading
+        from . import embed
+
+        def _hide_taskbar():
+            h = embed.find_hwnd_by_title(f"__rec_{device.serial}", timeout=8)
+            if h:
+                embed.hide_from_taskbar(h)
+        threading.Thread(target=_hide_taskbar, daemon=True).start()
         return True
 
     def stop_record(self, serial: str, timeout: float = 6.0) -> bool:

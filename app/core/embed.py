@@ -12,7 +12,12 @@ from ctypes import wintypes
 user32 = ctypes.windll.user32
 
 GWLP_HWNDPARENT = -8
+GWL_EXSTYLE = -20
+WS_EX_TOOLWINDOW = 0x00000080
+WS_EX_APPWINDOW = 0x00040000
 GA_ROOT = 2
+SW_HIDE = 0
+SW_SHOWNA = 8                  # 显示但不激活、不改 Z 序
 SW_SHOWNOACTIVATE = 4          # 显示但不抢焦点（独立窗口恢复时重新显示 scrcpy 用）
 SWP_NOACTIVATE = 0x0010
 SWP_NOZORDER = 0x0004
@@ -101,6 +106,25 @@ def batch_place(items):
         if not hdwp:
             return
     user32.EndDeferWindowPos(hdwp)
+
+
+user32.GetWindowLongW.restype = ctypes.c_long
+user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.SetWindowLongW.restype = ctypes.c_long
+user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
+
+
+def hide_from_taskbar(hwnd):
+    """把窗口改成“工具窗口”，使其不在任务栏显示（录制用的隐藏窗口不该占任务栏图标）。
+
+    改扩展样式后需 hide→show 一次让任务栏刷新；窗口本在屏幕外(-3000)，无可见闪烁。
+    """
+    ex = user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & 0xFFFFFFFF
+    ex = (ex & ~WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW
+    ex_signed = ex - 0x100000000 if ex & 0x80000000 else ex
+    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_signed)
+    user32.ShowWindow(hwnd, SW_HIDE)
+    user32.ShowWindow(hwnd, SW_SHOWNA)
 
 
 def close(child_hwnd):
