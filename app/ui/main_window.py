@@ -282,6 +282,16 @@ class App:
         self.C_TAG_OFF_BG = "#e2e6ea"  # 未激活标签
         self.C_TAG_OFF_FG = "#495057"
         self.root.title(f"{config.APP_NAME} v{config.APP_VERSION}")
+        # 设置窗口图标
+        try:
+            if os.path.exists(config.ICON_ICO):
+                self.root.iconbitmap(config.ICON_ICO)
+            if os.path.exists(config.ICON_PNG):
+                _icon = tk.PhotoImage(file=config.ICON_PNG)
+                self.root.iconphoto(True, _icon)
+                self._icon_img = _icon      # 防止被 GC 回收
+        except Exception:
+            pass
         if self.settings.window_geometry:            # 恢复上次窗口大小/位置
             try:
                 self.root.geometry(self.settings.window_geometry)

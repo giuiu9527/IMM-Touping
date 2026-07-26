@@ -18,6 +18,10 @@ else:
 SCRCPY_DIR = os.path.join(ROOT, "scrcpy")
 SCRCPY_EXE = os.path.join(SCRCPY_DIR, "scrcpy.exe")
 ADB_EXE = os.path.join(SCRCPY_DIR, "adb.exe")
+# 图标（放在 app/ 目录下，源码和打包都能找到）
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+ICON_ICO = os.path.join(_APP_DIR, "imm.ico")
+ICON_PNG = os.path.join(_APP_DIR, "imm.png")
 # 应用信息
 APP_NAME = "IMM投屏"
 APP_VERSION = "0.1.11"
