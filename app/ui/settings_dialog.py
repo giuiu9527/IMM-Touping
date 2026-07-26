@@ -54,10 +54,15 @@ def build_record_fields(parent, cfg, cached_encoders):
     tb.Combobox(parent, textvariable=v["audio_codec"], values=config.AUDIO_CODEC_CHOICES,
                 state="readonly", width=12).grid(row=6, column=1, columnspan=2, sticky=E, padx=10, pady=6)
 
-    tb.Label(parent, text="时长上限(秒,0=不限)").grid(row=7, column=0, sticky=W, padx=10, pady=6)
+    tb.Label(parent, text="音频源(playback最响)").grid(row=7, column=0, sticky=W, padx=10, pady=6)
+    v["audio_source"] = tk.StringVar(value=cfg.get("audio_source", "playback"))
+    tb.Combobox(parent, textvariable=v["audio_source"], values=config.AUDIO_SOURCE_CHOICES,
+                state="readonly", width=12).grid(row=7, column=1, columnspan=2, sticky=E, padx=10, pady=6)
+
+    tb.Label(parent, text="时长上限(秒,0=不限)").grid(row=8, column=0, sticky=W, padx=10, pady=6)
     v["time_limit"] = tk.StringVar(value=str(cfg["time_limit"]))
     tb.Entry(parent, textvariable=v["time_limit"], width=10).grid(
-        row=7, column=1, columnspan=2, sticky=E, padx=10, pady=6)
+        row=8, column=1, columnspan=2, sticky=E, padx=10, pady=6)
     return v
 
 
@@ -89,6 +94,7 @@ def collect_record_fields(v):
         fmt=v["fmt"].get(),
         audio=v["audio"].get(),
         audio_codec=v["audio_codec"].get(),
+        audio_source=v["audio_source"].get(),
         time_limit=_i(v["time_limit"].get(), 0),
     )
 
@@ -230,7 +236,8 @@ class SettingsDialog(tb.Toplevel):
         self.v_rec_format = self._opt(f4, 4, "录制格式", s.record_format, config.RECORD_FORMAT_CHOICES)
         self.v_rec_audio = self._switch(f4, 5, "录制声音", s.record_audio)
         self.v_rec_acodec = self._opt(f4, 6, "音频编码", s.record_audio_codec, config.AUDIO_CODEC_CHOICES)
-        self.v_rec_limit = self._entry(f4, 7, "时长上限(秒，0=不限)", s.record_time_limit, width=10)
+        self.v_rec_asource = self._opt(f4, 7, "音频源(playback最响)", s.record_audio_source, config.AUDIO_SOURCE_CHOICES)
+        self.v_rec_limit = self._entry(f4, 8, "时长上限(秒，0=不限)", s.record_time_limit, width=10)
 
         # ---- 存储 ----
         f5 = tb.Frame(nb)
@@ -332,6 +339,7 @@ class SettingsDialog(tb.Toplevel):
         s.record_format = self.v_rec_format.get()
         s.record_audio = self.v_rec_audio.get()
         s.record_audio_codec = self.v_rec_acodec.get()
+        s.record_audio_source = self.v_rec_asource.get()
         s.record_time_limit = self._to_int(self.v_rec_limit.get(), 0)
         # 存储
         s.records_dir = self.v_dir.get().strip()

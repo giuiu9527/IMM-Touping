@@ -20,7 +20,7 @@ SCRCPY_EXE = os.path.join(SCRCPY_DIR, "scrcpy.exe")
 ADB_EXE = os.path.join(SCRCPY_DIR, "adb.exe")
 # 应用信息
 APP_NAME = "IMM投屏"
-APP_VERSION = "0.1.7"
+APP_VERSION = "0.1.8"
 GITHUB_OWNER = "loadingkuu"
 GITHUB_REPO = "IMM-Touping"          # 仓库名，发布时确认
 
@@ -46,6 +46,7 @@ FLUIDITY_CHOICES = ["高", "中", "低"]
 VIDEO_CODEC_CHOICES = ["h264", "h265", "av1"]
 AUDIO_CODEC_CHOICES = ["aac", "opus", "flac"]
 RECORD_FORMAT_CHOICES = ["mp4", "mkv"]
+AUDIO_SOURCE_CHOICES = ["playback", "output", "mic"]   # playback 最响(默认)
 MAXSIZE_CHOICES = ["原画", "1080", "720", "480"]   # “原画”表示不限制(0)
 FPS_CHOICES = ["60", "30", "25", "15"]
 BITRATE_CHOICES = ["16M", "8M", "4M", "2M"]
@@ -87,6 +88,7 @@ class Settings:
     record_format: str = "mkv"           # 容器格式 mp4/mkv（opus 需 mkv）
     record_audio: bool = True            # 是否录制声音
     record_audio_codec: str = "opus"     # 音频编码：opus 比 aac 更大声（和 escrcpy 一致）
+    record_audio_source: str = "playback"  # 音频源：playback 比 output 大很多（和 escrcpy 一致）
     record_time_limit: int = 0           # 录制时长上限(秒)，0=不限
 
     # 存储设置
@@ -126,6 +128,7 @@ class Settings:
             fmt=self.record_format,
             audio=self.record_audio,
             audio_codec=self.record_audio_codec,
+            audio_source=self.record_audio_source,
             time_limit=self.record_time_limit,
         )
 

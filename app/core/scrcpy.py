@@ -87,7 +87,8 @@ class ScrcpyManager:
         if rec.get("max_size"):
             cmd += ["--max-size", str(rec["max_size"])]
         if rec.get("audio", True):
-            cmd += ["--audio-codec", rec.get("audio_codec", "aac")]
+            cmd += ["--audio-codec", rec.get("audio_codec", "opus"),
+                    "--audio-source", rec.get("audio_source", "playback")]
         else:
             cmd += ["--no-audio"]
         if rec.get("time_limit"):
