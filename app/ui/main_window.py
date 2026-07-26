@@ -306,14 +306,17 @@ class App:
         self.C_TAG_OFF_BG = "#e2e6ea"  # 未激活标签
         self.C_TAG_OFF_FG = "#495057"
         self.root.title(f"{config.APP_NAME} v{config.APP_VERSION}")
-        # 设置窗口图标
+        # 设置窗口图标（使用 Win32 原生 WM_SETICON 注入 HICON 句柄，保证任务栏 100% 高清无模糊）
         try:
             if os.path.exists(config.ICON_ICO):
                 self.root.iconbitmap(config.ICON_ICO)
-            if os.path.exists(config.ICON_PNG):
-                _icon = tk.PhotoImage(file=config.ICON_PNG)
-                self.root.iconphoto(True, _icon)
-                self._icon_img = _icon      # 防止被 GC 回收
+                import ctypes
+                u32 = ctypes.windll.user32
+                hicon = u32.LoadImageW(0, config.ICON_ICO, 1, 0, 0, 0x0010)   # IMAGE_ICON, LR_LOADFROMFILE
+                if hicon:
+                    hwnd = embed.root_hwnd(int(self.root.winfo_id()))
+                    u32.SendMessageW(hwnd, 0x0080, 1, hicon)   # WM_SETICON, ICON_BIG
+                    u32.SendMessageW(hwnd, 0x0080, 0, hicon)   # WM_SETICON, ICON_SMALL
         except Exception:
             pass
         if self.settings.window_geometry:            # 恢复上次窗口大小/位置
