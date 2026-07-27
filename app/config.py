@@ -25,7 +25,7 @@ ICON_PNG = os.path.join(_APP_DIR, "imm.png")
 # 应用信息
 APP_NAME = "IMM投屏"
 APP_VERSION = "0.1.19"
-GITHUB_OWNER = "loadingkuu"
+GITHUB_OWNER = "giuiu9527"           # 在线更新查这个账户的 releases
 GITHUB_REPO = "IMM-Touping"          # 仓库名，发布时确认
 
 SETTINGS_PATH = os.path.join(ROOT, "settings.json")
