@@ -906,7 +906,8 @@ class App:
         if not device.is_online:
             messagebox.showwarning("投屏", f"{device.display_name} 不在线")
             return
-        name = self.book.name(device.serial, device.display_name)
+        num = self._display_number(device)
+        name = f"{num:02d}"                            # 独立窗口标题只显示编号
         if self.scrcpy.is_running(device.serial, "solo"):
             self.log(f"独立投屏已在运行: {name}")
             return

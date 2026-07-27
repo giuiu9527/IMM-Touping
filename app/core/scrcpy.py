@@ -166,7 +166,7 @@ class ScrcpyManager:
         h = int(w * 1.9)  # 竖屏手机大致比例，scrcpy 会按真实比例自适应
         display = name or device.display_name
         cmd = self._build_base(device.serial, s.solo_resolution, s.solo_fluidity,
-                               f"独立 · {display}")
+                               f"{display}")          # 窗口标题只显示传入内容(编号)
         cmd += [
             "--window-width", str(w),
             "--window-height", str(h),
