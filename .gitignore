@@ -16,4 +16,6 @@ __pycache__/
 # PyInstaller 打包产物
 build/
 dist/
+# 手改过的打包配置(exe名/图标/打包数据)要入库，其余 spec 忽略
 *.spec
+!IMM-Touping.spec
