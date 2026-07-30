@@ -932,8 +932,22 @@ class App:
         if self.scrcpy.is_running(device.serial, "solo"):
             self.log(f"独立投屏已在运行: {name}")
             return
-        self.scrcpy.launch_solo(device, name=name)   # 原生 scrcpy 独立窗口
         self.log(f"独立投屏: {name}")
+
+        def worker():
+            # 按手机当前横竖屏定窗口大小：短边=solo_window_size，长边按画面比例自适应
+            w0 = self.settings.solo_window_size
+            win_w, win_h = w0, int(w0 * 1.9)           # 拿不到朝向就按竖屏默认
+            sz = self.adb.get_current_size(device.serial)
+            if sz and sz[0] and sz[1]:
+                cw, ch = sz
+                lo, sh = max(cw, ch), min(cw, ch)
+                if cw > ch:                            # 横屏：短边是高
+                    win_w, win_h = round(w0 * lo / sh), w0
+                else:                                  # 竖屏：短边是宽
+                    win_w, win_h = w0, round(w0 * lo / sh)
+            self.scrcpy.launch_solo(device, name=name, win_w=win_w, win_h=win_h)
+        threading.Thread(target=worker, daemon=True).start()
 
     def _send_key_one(self, device, code):
         threading.Thread(target=lambda: self.adb.shell(device.serial, f"input keyevent {code}"),

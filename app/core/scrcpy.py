@@ -157,14 +157,15 @@ class ScrcpyManager:
         self._procs[key] = subprocess.Popen(cmd, creationflags=_NO_WINDOW)
 
     # ---------- 独立窗口 ----------
-    def launch_solo(self, device, name: str = None):
+    def launch_solo(self, device, name: str = None, win_w: int = None, win_h: int = None):
         s = self.settings
         key = (device.serial, "solo")
         self._cleanup()
         if key in self._procs:
             return
-        w = s.solo_window_size
-        h = int(w * 1.9)  # 竖屏手机大致比例，scrcpy 会按真实比例自适应
+        # win_w/win_h 由调用方按手机当前横竖屏算好(短边=solo_window_size)；没给就按竖屏默认
+        w = int(win_w) if win_w else s.solo_window_size
+        h = int(win_h) if win_h else int((win_w or s.solo_window_size) * 1.9)
         display = name or device.display_name
         cmd = self._build_base(device.serial, s.solo_resolution, s.solo_fluidity,
                                f"{display}")          # 窗口标题只显示传入内容(编号)

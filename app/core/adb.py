@@ -103,6 +103,21 @@ class Adb:
         w, h = m[-1]
         return int(w), int(h)
 
+    def get_current_size(self, serial: str):
+        """当前显示尺寸 (宽, 高)，**反映当前横竖屏**（横屏时宽>高）。失败返回 None。
+
+        用 dumpsys window displays 里的 cur=WxH（当前逻辑分辨率，会随旋转变化），
+        比 wm size（只给物理竖屏分辨率）更适合决定独立窗口该竖长还是横宽。
+        """
+        code, out = self._run(["shell", "dumpsys", "window", "displays"], serial=serial, timeout=8)
+        if code != 0:
+            return None
+        import re
+        m = re.search(r"cur=(\d+)x(\d+)", out)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+        return None
+
     def getprops(self, serial: str, keys) -> dict:
         """批量读取 getprop 值。"""
         result = {}
