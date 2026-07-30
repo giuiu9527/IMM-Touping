@@ -770,6 +770,11 @@ class App:
                   activebackground=self.colors.primary, activeforeground="#fff",
                   cursor="hand2",
                   command=lambda dev=device: self.solo_mirror(dev)).pack(side=RIGHT, padx=2)
+        tk.Button(footer, text="⟳ 重连", font=(FONT, 8), bd=0,
+                  bg=self.C_HEADER, fg=self.colors.primary,
+                  activebackground=self.colors.primary, activeforeground="#fff",
+                  cursor="hand2",
+                  command=lambda dev=device: self._reconnect_device(dev)).pack(side=RIGHT, padx=2)
         recbtn = tk.Button(footer, text="● 录制", font=(FONT, 8), bd=0,
                            bg=self.C_HEADER, fg="#888", activebackground="#e03131",
                            activeforeground="#fff", cursor="hand2",
@@ -875,6 +880,22 @@ class App:
             rec.pack(side=RIGHT, padx=4)
             self._rec_labels.append(rec)
         header.bind("<Double-Button-1>", lambda e, d=dev: self._edit_device(d))
+
+    def _reconnect_device(self, device):
+        """重连单台群控画面：停掉旧 scrcpy + 移除黑屏格子，稍等再重开。
+        用于设备重启后画面黑屏（重启时 scrcpy 在设备没就绪时接管导致的黑屏）。"""
+        serial = device.serial
+        self._remove_tile(serial)
+        self.log(f"重连: {self.book.name(serial, device.display_name)}")
+
+        def redo():
+            cur = next((d for d in self.devices if d.serial == serial and d.is_online), None)
+            if cur:
+                self._embed_device(cur)
+            else:
+                self.log(f"重连失败: {serial} 当前不在线")
+        # 稍等让旧进程/窗口彻底退出，并给刚重启的设备一点就绪时间
+        self.root.after(1200, redo)
 
     def _remove_tile(self, serial):
         tile = self.tiles.pop(serial, None)
