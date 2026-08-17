@@ -61,6 +61,7 @@ settings.json/devices.json/records/  # 运行时生成（gitignore）
 - **格子尺寸必须按手机真实屏幕比例**：scrcpy 会把窗口自动调成手机画面比例，若格子比例不对就会错位/留黑边。见 `_tile_dims`/`_ratios`（用 `adb.get_resolution`）。
 - **偶发黑屏**：scrcpy 在屏外/被遮挡时 SDL 会暂停渲染，搬进来后不一定立刻重绘。对策：`_nudge_overlay` 改 1px 尺寸多次触发 WM_SIZE 唤醒重绘（群控 `_attach` 里 300~3200ms 分 5 次）。
 - **独立投屏**：独立投屏已切回原生 scrcpy 窗口（`launch_solo`），不进行 Win32 嵌套/`set_owner`。启动时需带 `creationflags=_NO_WINDOW` 隐藏黑色的 CMD 控制台，并加上 `--audio-source=playback` 解决默认 `output` 衰减 -33dB 导致声音过小的坑。
+- **独立投屏互斥**：产品规则为同一时间只保留一个独立投屏。`App.solo_mirror` 启动新设备前会调用 `ScrcpyManager.stop_other_solos` 关闭旧的独立 scrcpy 进程。
 
 ### 坑#2 —— 录制声音过小（花了两版才定位）
 - **不是编码问题**（aac/opus 都试过）。真凶是**音频源**：scrcpy 默认 `--audio-source=output`(REMOTE_SUBMIX) 在部分机型(如 OnePlus LE2100)被衰减约 **33dB**（实测 RMS -59 vs escrcpy -26 dBFS）。
@@ -150,6 +151,7 @@ cp -r scrcpy dist/IMM-Touping/scrcpy      # 把引擎放进去
 | 设置面板/每设备录制/编码器检测 | `app/ui/settings_dialog.py` |
 | 在线更新 | `app/core/updater.py` |
 | 加新功能按钮 | `app/ui/actions.py` + `features.py` |
+| 多设备 APK 并行安装 / 操作日志名称 | `app/ui/actions.py`（安装日志显示“编号 + 标签”） |
 | 手机端控制 API（自动录制/改名） | `app/core/apiserver.py` + `App._api_dispatch/api_*`（见 7.5） |
 | 按设备编号/标签分文件夹存录像 | `App._device_records_dir`（`settings.subfolder_by_device`，默认开；设置→存储可关） |
 | 配套手机端 autox.js 脚本 | 见第 10 节 |

@@ -7,13 +7,21 @@ handler 统一接收 app（主窗口实例），可拿到 selected_devices()/adb
 """
 import os
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from tkinter import filedialog, simpledialog, messagebox
 
 from ..core.features import register
 
 
 # ---------- 公共：对选中设备批量执行 ----------
-def _for_selected(app, title, task):
+def _device_log_name(app, device):
+    """日志统一显示用户设置的编号与标签，而不是难识别的设备型号。"""
+    number = app._display_number(device)
+    name = app.book.name(device.serial, device.display_name)
+    return f"{number:02d} {name}"
+
+
+def _for_selected(app, title, task, *, parallel=False):
     """task(device) -> (ok, msg)；后台线程执行，结果写日志。"""
     devices = app.selected_devices()
     if not devices:
@@ -22,10 +30,27 @@ def _for_selected(app, title, task):
 
     def worker():
         app.log(f"=== {title} 开始，共 {len(devices)} 台 ===")
-        for d in devices:
-            ok, msg = task(d)
+        def report(d, result):
+            ok, msg = result
             flag = "[OK]" if ok else "[X]"
-            app.log(f"  {flag} {d.display_name}: {msg[:120]}")
+            app.log(f"  {flag} {_device_log_name(app, d)}: {msg[:120]}")
+
+        if parallel:
+            # adb 对每个序列号分别启动一个进程，可安全并行传输/安装。
+            with ThreadPoolExecutor(max_workers=len(devices)) as pool:
+                futures = {pool.submit(task, d): d for d in devices}
+                for future in as_completed(futures):
+                    d = futures[future]
+                    try:
+                        report(d, future.result())
+                    except Exception as exc:
+                        report(d, (False, str(exc)))
+        else:
+            for d in devices:
+                try:
+                    report(d, task(d))
+                except Exception as exc:
+                    report(d, (False, str(exc)))
         app.log(f"=== {title} 完成 ===")
 
     threading.Thread(target=worker, daemon=True).start()
@@ -47,7 +72,7 @@ def handle_dropped_files(app, paths):
 def _install_apk_path(app, apk):
     name = os.path.basename(apk)
     _for_selected(app, f"安装APK [{name}]",
-                  lambda d: app.adb.install(d.serial, apk))
+                  lambda d: app.adb.install(d.serial, apk), parallel=True)
 
 
 def _push_file_path(app, path):

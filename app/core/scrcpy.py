@@ -178,6 +178,18 @@ class ScrcpyManager:
         # creationflags=_NO_WINDOW：隐藏黑色的 CMD 控制台终端窗口，只留下 scrcpy 原生画面窗口
         self._procs[key] = subprocess.Popen(cmd, creationflags=_NO_WINDOW)
 
+    def stop_other_solos(self, serial: str):
+        """关闭除 ``serial`` 之外的独立投屏，独立投屏始终只保留一个。"""
+        self._cleanup()
+        for key in list(self._procs):
+            running_serial, mode = key
+            if mode == "solo" and running_serial != serial:
+                try:
+                    self._procs[key].terminate()
+                except Exception:
+                    pass
+                self._procs.pop(key, None)
+
     # ---------- 群控窗口（嵌入软件网格） ----------
     def start_embed_process(self, device, x=-3000, y=-3000, w=300, h=570):
         """启动一个无边框 scrcpy 供嵌入，返回窗口标题(用于查找句柄)。

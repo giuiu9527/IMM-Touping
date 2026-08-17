@@ -932,6 +932,9 @@ class App:
         if self.scrcpy.is_running(device.serial, "solo"):
             self.log(f"独立投屏已在运行: {name}")
             return
+        # 独立投屏只允许一台：先结束之前的原生 scrcpy 窗口，再启动当前设备。
+        # 这类窗口不是 Tk 的子窗口，不能依赖主窗口销毁来自动关闭。
+        self.scrcpy.stop_other_solos(device.serial)
         self.log(f"独立投屏: {name}")
 
         def worker():
