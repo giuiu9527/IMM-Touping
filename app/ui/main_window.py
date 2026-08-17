@@ -931,6 +931,7 @@ class App:
         name = f"{num:02d}"                            # 独立窗口标题只显示编号
         if self.scrcpy.is_running(device.serial, "solo"):
             self.log(f"独立投屏已在运行: {name}")
+            self._bring_solo_to_front(name)
             return
         # 独立投屏只允许一台：先结束之前的原生 scrcpy 窗口，再启动当前设备。
         # 这类窗口不是 Tk 的子窗口，不能依赖主窗口销毁来自动关闭。
@@ -950,6 +951,18 @@ class App:
                 else:                                  # 竖屏：短边是宽
                     win_w, win_h = w0, round(w0 * lo / sh)
             self.scrcpy.launch_solo(device, name=name, win_w=win_w, win_h=win_h)
+            # 原生 scrcpy 是独立顶层窗口；启动完成后主动置前，避免被其它软件盖住。
+            hwnd = embed.find_hwnd_by_title(name, timeout=8)
+            if hwnd:
+                embed.bring_to_front(hwnd)
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _bring_solo_to_front(self, title):
+        """异步查找已运行的独立投屏窗口并置前，避免阻塞界面。"""
+        def worker():
+            hwnd = embed.find_hwnd_by_title(title, timeout=3)
+            if hwnd:
+                embed.bring_to_front(hwnd)
         threading.Thread(target=worker, daemon=True).start()
 
     def _send_key_one(self, device, code):

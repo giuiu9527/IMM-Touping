@@ -19,6 +19,7 @@ GA_ROOT = 2
 SW_HIDE = 0
 SW_SHOWNA = 8                  # 显示但不激活、不改 Z 序
 SW_SHOWNOACTIVATE = 4          # 显示但不抢焦点（独立窗口恢复时重新显示 scrcpy 用）
+SW_RESTORE = 9                 # 从最小化状态恢复
 SWP_NOACTIVATE = 0x0010
 SWP_NOZORDER = 0x0004
 SWP_SHOWWINDOW = 0x0040
@@ -79,6 +80,15 @@ def raise_over(child_hwnd, x, y, w, h):
     if w > 0 and h > 0:
         user32.SetWindowPos(child_hwnd, 0, int(x), int(y), int(w), int(h),
                             SWP_NOACTIVATE | SWP_SHOWWINDOW)   # HWND_TOP，抬到最前
+
+
+def bring_to_front(hwnd):
+    """恢复并激活原生投屏窗口，使其出现在当前所有窗口前面。"""
+    if not hwnd:
+        return
+    user32.ShowWindow(hwnd, SW_RESTORE)
+    user32.BringWindowToTop(hwnd)
+    user32.SetForegroundWindow(hwnd)
 
 
 user32.BeginDeferWindowPos.restype = ctypes.c_void_p
