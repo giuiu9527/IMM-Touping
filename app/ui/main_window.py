@@ -9,6 +9,7 @@ import re
 import sys
 import threading
 import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import tkinter as tk
 from tkinter import messagebox
 import ttkbootstrap as tb
@@ -38,7 +39,7 @@ THEME = "cosmo"          # 亮色现代主题
 FONT = "微软雅黑"
 
 # 手机导航按键
-KEY_BACK, KEY_HOME, KEY_RECENT = 4, 3, 187
+KEY_BACK, KEY_HOME, KEY_RECENT, KEY_SLEEP = 4, 3, 187, 223
 
 # 编辑弹窗里标签块的配色（循环）
 TAG_COLORS = ["#3a6ea5", "#2e8b57", "#a0522d", "#8a2be2", "#b8860b", "#008b8b"]
@@ -417,7 +418,7 @@ class App:
         tb.Button(s1, text="刷新", bootstyle="secondary-outline", command=self._poll
                   ).grid(row=1, column=2, padx=3, pady=(0, 4), sticky="ew")
 
-        # 手机导航：发按键给“选中的设备”（没选就发给全部在线）
+        # 手机导航只控制当前独立投屏设备；休眠按钮则作用于全部未录制设备。
         s2 = self._section(left, "手机导航（独立投屏设备）")
         for i, (text, code, name) in enumerate([
                 ("← 返回", KEY_BACK, "返回"),
@@ -426,6 +427,9 @@ class App:
             tb.Button(s2, text=text, bootstyle="info-outline",
                       command=lambda c=code, n=name: self._send_key(c, n)
                       ).grid(row=0, column=i, padx=3, pady=4, sticky="ew")
+        tb.Button(s2, text="关闭未录制屏幕", bootstyle="secondary-outline",
+                  command=self._sleep_unrecorded_devices
+                  ).grid(row=1, column=0, columnspan=3, padx=3, pady=(0, 4), sticky="ew")
 
         s4 = self._section(left, "文件 / 命令")
         for i, f in enumerate(all_features()):
@@ -1081,6 +1085,34 @@ class App:
         def worker():
             self.adb.shell(device.serial, f"input keyevent {code}")
             self.log(f"{name} → {self._display_number(device):02d}")
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _sleep_unrecorded_devices(self):
+        """让所有在线但未录制的设备进入休眠，避免误关正在录制的手机屏幕。"""
+        devices = [d for d in self.devices if d.is_online and d.serial not in self.recording]
+        if not devices:
+            self.log("关闭屏幕: 没有可操作的未录制设备")
+            return
+
+        def worker():
+            ok_numbers, failed_numbers = [], []
+            with ThreadPoolExecutor(max_workers=len(devices)) as pool:
+                futures = {pool.submit(self.adb.shell, d.serial, f"input keyevent {KEY_SLEEP}"): d
+                           for d in devices}
+                for future in as_completed(futures):
+                    device = futures[future]
+                    try:
+                        ok, _ = future.result()
+                    except Exception:
+                        ok = False
+                    (ok_numbers if ok else failed_numbers).append(self._display_number(device))
+            ok_text = "、".join(f"{n:02d}" for n in sorted(ok_numbers))
+            failed_text = "、".join(f"{n:02d}" for n in sorted(failed_numbers))
+            msg = f"关闭屏幕: {ok_text}" if ok_text else "关闭屏幕: 无设备成功"
+            if failed_text:
+                msg += f"；失败: {failed_text}"
+            self.log(msg)
+
         threading.Thread(target=worker, daemon=True).start()
 
     # ---------------- 录屏 ----------------
