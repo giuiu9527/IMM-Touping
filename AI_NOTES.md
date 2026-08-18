@@ -59,6 +59,7 @@ settings.json/devices.json/records/  # 运行时生成（gitignore）
 - **DPI**：用 `SetProcessDpiAwarenessContext(-4)`（PerMonitorV2，见 `main.py._enable_dpi`）。PMv2 能正确托管低感知的 scrcpy 子窗口（自动缩放，不销毁）。**别用老的 `SetProcessDpiAwareness(1或2)`**——那会把被从属化的 scrcpy 窗口几秒内杀掉导致黑屏。这是 4K/高缩放屏字体清晰的前提。
 - **接管时机**：找到 scrcpy 窗口后要**等一会儿再 set_owner**（太早接管会崩），且多台设备要**错开逐台启动**（`_sync` 里 `after(i*1800, ...)`），同时启动会互相抢占崩溃。
 - **格子尺寸必须按手机真实屏幕比例**：scrcpy 会把窗口自动调成手机画面比例，若格子比例不对就会错位/留黑边。见 `_tile_dims`/`_ratios`（用 `adb.get_resolution`）。
+- **网格边界**：`grid_frame` 必须 `grid_propagate(False)`，不能被内部格子反向撑宽；每次定位原生窗口还要经 `_visible_video_rect` 校验，格子不完全在网格可视区则隐藏窗口。owned window 不会被 Tk 自动裁剪，这是防止画面越界的必要保护。
 - **偶发黑屏**：scrcpy 在屏外/被遮挡时 SDL 会暂停渲染，搬进来后不一定立刻重绘。对策：`_nudge_overlay` 改 1px 尺寸多次触发 WM_SIZE 唤醒重绘（群控 `_attach` 里 300~3200ms 分 5 次）。
 - **独立投屏**：独立投屏已切回原生 scrcpy 窗口（`launch_solo`），不进行 Win32 嵌套/`set_owner`。启动时需带 `creationflags=_NO_WINDOW` 隐藏黑色的 CMD 控制台，并加上 `--audio-source=playback` 解决默认 `output` 衰减 -33dB 导致声音过小的坑。
 - **独立投屏互斥**：产品规则为同一时间只保留一个独立投屏。`App.solo_mirror` 启动新设备前会调用 `ScrcpyManager.stop_other_solos` 关闭旧的独立 scrcpy 进程。

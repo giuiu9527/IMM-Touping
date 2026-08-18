@@ -472,6 +472,9 @@ class App:
 
         self.grid_frame = tk.Frame(right, bg=self.C_GRID)
         self.grid_frame.pack(fill=BOTH, expand=True)
+        # 格子必须只在右侧面板的实际可用宽度内排版。否则 grid 子项的请求宽度会
+        # 反向把容器“撑宽”，导致列数计算误判并把原生 scrcpy 窗口排到主窗外。
+        self.grid_frame.grid_propagate(False)
         self.grid_frame.bind("<Configure>", self._on_grid_resize)
 
     # ---------------- 设备轮询 ----------------
@@ -820,9 +823,15 @@ class App:
         tile = self.tiles.get(serial)
         if not tile or not tile["hwnd"] or not tile["video"].winfo_ismapped():
             return
-        v = tile["video"]
-        embed.place(tile["hwnd"], v.winfo_rootx(), v.winfo_rooty(),
-                    v.winfo_width(), v.winfo_height() + dh)
+        rect = self._visible_video_rect(tile["video"])
+        if not rect:
+            embed.user32.ShowWindow(tile["hwnd"], embed.SW_HIDE)
+            return
+        x, y, w, h = rect
+        # 重绘用的 2px 抖动也不能越过网格底边。
+        if y + h + dh > self.grid_frame.winfo_rooty() + self.grid_frame.winfo_height():
+            dh = 0
+        embed.place(tile["hwnd"], x, y, w, h + dh)
 
     def _owner_hwnd(self):
         return embed.root_hwnd(int(self.root.winfo_id()))
@@ -832,11 +841,32 @@ class App:
         tile = self.tiles.get(serial)
         if not tile or not tile["hwnd"]:
             return
-        v = tile["video"]
-        if not v.winfo_ismapped():
+        rect = self._visible_video_rect(tile["video"])
+        if not rect:
+            # owned window 不是 Tk 真子窗口，Tk 无法替我们裁剪它；格子不可完整
+            # 见时必须主动隐藏，否则它会以顶层原生窗口形式越出软件边界。
+            embed.user32.ShowWindow(tile["hwnd"], embed.SW_HIDE)
             return
-        embed.place(tile["hwnd"], v.winfo_rootx(), v.winfo_rooty(),
-                    v.winfo_width(), v.winfo_height())
+        embed.place(tile["hwnd"], *rect)
+
+    def _visible_video_rect(self, video):
+        """返回完全位于右侧网格内的视频区坐标；越界时返回 None。
+
+        scrcpy 使用 owned window 以避免 SDL 黑屏，因而不会被 Tk 容器裁剪。这层
+        校验是最后一道边界：布局短暂不稳定、窗体缩小或 DPI 重算期间，都不能让
+        原生窗口显示到主程序外面。
+        """
+        if not video or not video.winfo_ismapped() or not self.grid_frame.winfo_ismapped():
+            return None
+        x, y = video.winfo_rootx(), video.winfo_rooty()
+        w, h = video.winfo_width(), video.winfo_height()
+        gx, gy = self.grid_frame.winfo_rootx(), self.grid_frame.winfo_rooty()
+        gw, gh = self.grid_frame.winfo_width(), self.grid_frame.winfo_height()
+        if w <= 0 or h <= 0 or gw <= 0 or gh <= 0:
+            return None
+        if x < gx or y < gy or x + w > gx + gw or y + h > gy + gh:
+            return None
+        return x, y, w, h
 
     def _on_configure(self, _event=None):
         # 防抖：拖动时 <Configure> 每秒触发几十次，合并到约 60fps，避免卡顿
@@ -854,9 +884,13 @@ class App:
         items = []
         for tile in self.tiles.values():
             v = tile.get("video")
-            if tile.get("hwnd") and v and v.winfo_ismapped():
-                items.append((tile["hwnd"], v.winfo_rootx(), v.winfo_rooty(),
-                              v.winfo_width(), v.winfo_height()))
+            if not tile.get("hwnd"):
+                continue
+            rect = self._visible_video_rect(v)
+            if rect:
+                items.append((tile["hwnd"], *rect))
+            else:
+                embed.user32.ShowWindow(tile["hwnd"], embed.SW_HIDE)
         embed.batch_place(items)
 
     def _update_tile_header(self, serial):
@@ -905,7 +939,7 @@ class App:
         self._reflow()
 
     def _reflow(self):
-        tw, th = self._tile_size()
+        tw, _ = self._tile_size()
         avail = max(1, self.grid_frame.winfo_width())
         cols = max(1, avail // (tw + 6))
         ordered = sorted(self.tiles.items(),
