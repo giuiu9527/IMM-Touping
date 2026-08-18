@@ -730,6 +730,8 @@ class App:
             return
         w, h = self._tile_dims(serial)
         tile["video"].configure(width=w, height=h)
+        tile["header"].configure(width=w)
+        tile["footer"].configure(width=w)
         self._last_cols = 0
         self.root.update_idletasks()
         self._reflow()
@@ -747,6 +749,8 @@ class App:
         for serial, tile in self.tiles.items():
             tw, th = self._tile_dims(serial)
             tile["video"].configure(width=tw, height=th)
+            tile["header"].configure(width=tw)
+            tile["footer"].configure(width=tw)
         self._last_cols = 0
         self.root.update_idletasks()
         self._reflow()
@@ -760,14 +764,18 @@ class App:
         tw, th = self._tile_dims(device.serial)
         frame = tk.Frame(self.grid_frame, bg=self.C_TILE_BORDER,
                          highlightthickness=1, highlightbackground=self.C_TILE_BORDER)
-        header = tk.Frame(frame, bg=self.C_HEADER)
+        # 标题/底栏必须与视频区同宽；长标签不能把整张卡片撑宽，否则按视频
+        # 宽度计算列数时会少算实际占用，最后一列就会跑出主窗口。
+        header = tk.Frame(frame, bg=self.C_HEADER, width=tw, height=24)
         header.pack(fill=X)
+        header.pack_propagate(False)
         video = tk.Frame(frame, width=tw, height=th, bg="black")
         video.pack()
         video.pack_propagate(False)
         video.bind("<Configure>", lambda e, s=device.serial: self._position_overlay(s))
-        footer = tk.Frame(frame, bg=self.C_HEADER)
+        footer = tk.Frame(frame, bg=self.C_HEADER, width=tw, height=28)
         footer.pack(fill=X)
+        footer.pack_propagate(False)
         tk.Button(footer, text="↗ 独立", font=(FONT, 8), bd=0,
                   bg=self.C_HEADER, fg=self.colors.primary,
                   activebackground=self.colors.primary, activeforeground="#fff",
@@ -785,7 +793,8 @@ class App:
         recbtn.pack(side=LEFT, padx=2)
 
         self.tiles[device.serial] = {"frame": frame, "video": video, "device": device,
-                                     "header": header, "recbtn": recbtn, "hwnd": None}
+                                     "header": header, "footer": footer,
+                                     "recbtn": recbtn, "hwnd": None}
         self._update_tile_header(device.serial)
         self.root.update_idletasks()
         self._reflow()
@@ -862,11 +871,26 @@ class App:
         w, h = video.winfo_width(), video.winfo_height()
         gx, gy = self.grid_frame.winfo_rootx(), self.grid_frame.winfo_rooty()
         gw, gh = self.grid_frame.winfo_width(), self.grid_frame.winfo_height()
+        # grid_frame 的请求尺寸在布局重算期间可能暂时大于主窗口；真正的可见
+        # 区域必须再被主窗口客户区域裁一道，不能只相信 grid_frame 自己的大小。
+        rx, ry = self.root.winfo_rootx(), self.root.winfo_rooty()
+        rw, rh = self.root.winfo_width(), self.root.winfo_height()
+        left, top = max(gx, rx), max(gy, ry)
+        right, bottom = min(gx + gw, rx + rw), min(gy + gh, ry + rh)
         if w <= 0 or h <= 0 or gw <= 0 or gh <= 0:
             return None
-        if x < gx or y < gy or x + w > gx + gw or y + h > gy + gh:
+        if x < left or y < top or x + w > right or y + h > bottom:
             return None
         return x, y, w, h
+
+    def _grid_visible_width(self):
+        """右侧网格在主窗口中实际可用的宽度（排版不能使用被内容撑大的宽度）。"""
+        if not self.grid_frame.winfo_ismapped():
+            return 1
+        left = max(self.grid_frame.winfo_rootx(), self.root.winfo_rootx())
+        right = min(self.grid_frame.winfo_rootx() + self.grid_frame.winfo_width(),
+                    self.root.winfo_rootx() + self.root.winfo_width())
+        return max(1, right - left)
 
     def _on_configure(self, _event=None):
         # 防抖：拖动时 <Configure> 每秒触发几十次，合并到约 60fps，避免卡顿
@@ -914,6 +938,10 @@ class App:
             rec.pack(side=RIGHT, padx=4)
             self._rec_labels.append(rec)
         header.bind("<Double-Button-1>", lambda e, d=dev: self._edit_device(d))
+        # 标签长度会影响标题的请求尺寸；下一轮按实际边界重排，防止新增/改名后
+        # 仍沿用旧列数。
+        self._last_cols = 0
+        self.root.after_idle(self._reflow)
 
     def _reconnect_device(self, device):
         """重连单台群控画面：停掉旧 scrcpy + 移除黑屏格子，稍等再重开。
@@ -940,7 +968,7 @@ class App:
 
     def _reflow(self):
         tw, _ = self._tile_size()
-        avail = max(1, self.grid_frame.winfo_width())
+        avail = self._grid_visible_width()
         cols = max(1, avail // (tw + 6))
         ordered = sorted(self.tiles.items(),
                          key=lambda kv: self._numbers.get(kv[0], 9999))
@@ -951,7 +979,7 @@ class App:
 
     def _on_grid_resize(self, event):
         tw, _ = self._tile_size()
-        cols = max(1, event.width // (tw + 6))
+        cols = max(1, self._grid_visible_width() // (tw + 6))
         if cols != self._last_cols:
             self._last_cols = cols
             self._reflow()
