@@ -15,10 +15,9 @@ from ..core.features import register
 
 # ---------- 公共：对选中设备批量执行 ----------
 def _device_log_name(app, device):
-    """日志统一显示用户设置的编号与标签，而不是难识别的设备型号。"""
+    """日志统一显示用户设置的编号，便于和投屏格子一一对应。"""
     number = app._display_number(device)
-    name = app.book.name(device.serial, device.display_name)
-    return f"{number:02d} {name}"
+    return f"{number:02d}"
 
 
 def _for_selected(app, title, task, *, parallel=False):

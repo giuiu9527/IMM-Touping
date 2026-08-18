@@ -337,12 +337,12 @@ class App:
             try:
                 self.root.geometry(self.settings.window_geometry)
             except Exception:
-                self.root.geometry("1160x740")
+                self.root.geometry("1280x740")
                 center_window(self.root)
             if self.settings.window_maximized:
                 self.root.state("zoomed")
         else:
-            self.root.geometry("1160x740")
+            self.root.geometry("1280x740")
             center_window(self.root)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -353,6 +353,8 @@ class App:
         self._rec_files = {}            # serial -> 当前/最近一次录制文件路径（供 API 改名归档）
         self._rec_ids = {}              # serial -> 本次录制 id（供 API 定位）
         self.solo_windows = {}          # serial -> SoloWindow
+        self._solo_serial = None         # 当前独立投屏设备；左侧导航只控制它
+        self._solo_starting = False      # 独立投屏尚在启动，导航暂不可用
         self._rec_labels = []           # REC 指示灯(做呼吸动画)
         self._ratios = {}               # serial -> 屏幕宽/高比例(格子按此贴合)
         self._numbers = {}              # serial -> 显示编号(连续不重复)
@@ -378,7 +380,7 @@ class App:
     def _build_ui(self):
         paned = tb.Panedwindow(self.root, orient="horizontal")
         paned.pack(fill=BOTH, expand=True, padx=8, pady=8)
-        left = tb.Frame(paned, width=300)
+        left = tb.Frame(paned, width=340)
         left.pack_propagate(False)
         paned.add(left, weight=0)
         right = tb.Frame(paned)
@@ -416,7 +418,7 @@ class App:
                   ).grid(row=1, column=2, padx=3, pady=(0, 4), sticky="ew")
 
         # 手机导航：发按键给“选中的设备”（没选就发给全部在线）
-        s2 = self._section(left, "手机导航（发给选中设备）")
+        s2 = self._section(left, "手机导航（独立投屏设备）")
         for i, (text, code, name) in enumerate([
                 ("← 返回", KEY_BACK, "返回"),
                 ("● 桌面", KEY_HOME, "桌面"),
@@ -579,7 +581,7 @@ class App:
             tb.Label(row, text=f"{num:02d}", width=2, bootstyle="info").pack(side=LEFT)
             self._render_tag_chips(
                 row, self._device_tags(d),
-                on_click=lambda tag, dev=d: self._activate_tag(dev, tag))
+                on_click=lambda tag, dev=d: self._activate_tag(dev, tag), font_size=8)
             if not d.is_online:
                 tb.Label(row, text="离线", bootstyle="danger").pack(side=LEFT, padx=2)
             if d.serial in self.recording:
@@ -800,7 +802,7 @@ class App:
         self._reflow()
 
         title = self.scrcpy.start_embed_process(device)
-        self.log(f"投屏: {self.book.name(device.serial, device.display_name)}")
+        self.log(f"投屏: {self._display_number(device):02d}")
 
         def find_and_attach():
             if device.serial not in self._ratios:      # 先拿手机真实比例，贴合格子
@@ -948,7 +950,7 @@ class App:
         用于设备重启后画面黑屏（重启时 scrcpy 在设备没就绪时接管导致的黑屏）。"""
         serial = device.serial
         self._remove_tile(serial)
-        self.log(f"重连: {self.book.name(serial, device.display_name)}")
+        self.log(f"重连: {self._display_number(device):02d}")
 
         def redo():
             cur = next((d for d in self.devices if d.serial == serial and d.is_online), None)
@@ -991,7 +993,10 @@ class App:
             return
         num = self._display_number(device)
         name = f"{num:02d}"                            # 独立窗口标题只显示编号
+        self._solo_serial = device.serial
+        self._solo_starting = True
         if self.scrcpy.is_running(device.serial, "solo"):
+            self._solo_starting = False
             self.log(f"独立投屏已在运行: {name}")
             self._bring_solo_to_front(name)
             return
@@ -1012,7 +1017,12 @@ class App:
                     win_w, win_h = round(w0 * lo / sh), w0
                 else:                                  # 竖屏：短边是宽
                     win_w, win_h = w0, round(w0 * lo / sh)
+            # 查询设备尺寸期间用户可能改点了另一台，旧请求不能再启动。
+            if self._solo_serial != device.serial:
+                return
             self.scrcpy.launch_solo(device, name=name, win_w=win_w, win_h=win_h)
+            if self._solo_serial == device.serial:
+                self._solo_starting = False
             # 原生 scrcpy 是独立顶层窗口；启动完成后主动置前，避免被其它软件盖住。
             hwnd = embed.find_hwnd_by_title(name, timeout=8)
             if hwnd:
@@ -1045,20 +1055,32 @@ class App:
         for serial in list(self.tiles.keys()):
             self._remove_tile(serial)
         self.scrcpy.stop_all()
+        self._solo_serial = None
+        self._solo_starting = False
         self.log("已停止全部投屏")
         self._render_list(self.devices)
 
-    # ---------------- 手机导航（发按键给设备） ----------------
+    # ---------------- 手机导航（只发给当前独立投屏设备） ----------------
     def _send_key(self, code, name):
-        devs = self.selected_devices() or [d for d in self.devices if d.is_online]
-        if not devs:
-            self.log(f"{name}: 没有在线设备")
+        serial = self._solo_serial
+        if not serial:
+            self.log(f"{name}: 请先打开独立投屏")
+            return
+        if self._solo_starting:
+            self.log(f"{name}: 独立投屏正在启动")
+            return
+        if not self.scrcpy.is_running(serial, "solo"):
+            self._solo_serial = None
+            self.log(f"{name}: 请先打开独立投屏")
+            return
+        device = next((d for d in self.devices if d.serial == serial and d.is_online), None)
+        if not device:
+            self.log(f"{name}: 独立投屏设备已离线")
             return
 
         def worker():
-            for d in devs:
-                self.adb.shell(d.serial, f"input keyevent {code}")
-            self.log(f"{name} → {len(devs)} 台")
+            self.adb.shell(device.serial, f"input keyevent {code}")
+            self.log(f"{name} → {self._display_number(device):02d}")
         threading.Thread(target=worker, daemon=True).start()
 
     # ---------------- 录屏 ----------------
