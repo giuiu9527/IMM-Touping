@@ -782,21 +782,26 @@ class App:
         footer = tk.Frame(frame, bg=self.C_HEADER, width=tw, height=28)
         footer.pack(fill=X)
         footer.pack_propagate(False)
-        tk.Button(footer, text="↗ 独立", font=(FONT, 8), bd=0,
+        tk.Button(footer, text="↗独立", font=(FONT, 8), bd=0,
                   bg=self.C_HEADER, fg=self.colors.primary,
                   activebackground=self.colors.primary, activeforeground="#fff",
                   cursor="hand2",
-                  command=lambda dev=device: self.solo_mirror(dev)).pack(side=RIGHT, padx=2)
-        tk.Button(footer, text="⟳ 重连", font=(FONT, 8), bd=0,
+                  command=lambda dev=device: self.solo_mirror(dev)).pack(side=RIGHT, padx=1)
+        tk.Button(footer, text="⟳重连", font=(FONT, 8), bd=0,
                   bg=self.C_HEADER, fg=self.colors.primary,
                   activebackground=self.colors.primary, activeforeground="#fff",
                   cursor="hand2",
-                  command=lambda dev=device: self._reconnect_device(dev)).pack(side=RIGHT, padx=2)
-        recbtn = tk.Button(footer, text="● 录制", font=(FONT, 8), bd=0,
+                  command=lambda dev=device: self._reconnect_device(dev)).pack(side=RIGHT, padx=1)
+        tk.Button(footer, text="▣锁屏", font=(FONT, 8), bd=0,
+                  bg=self.C_HEADER, fg=self.colors.primary,
+                  activebackground=self.colors.primary, activeforeground="#fff",
+                  cursor="hand2",
+                  command=lambda dev=device: self._sleep_one_device(dev)).pack(side=RIGHT, padx=1)
+        recbtn = tk.Button(footer, text="●录制", font=(FONT, 8), bd=0,
                            bg=self.C_HEADER, fg="#888", activebackground="#e03131",
                            activeforeground="#fff", cursor="hand2",
                            command=lambda dev=device: self._toggle_record(dev))
-        recbtn.pack(side=LEFT, padx=2)
+        recbtn.pack(side=LEFT, padx=1)
 
         self.tiles[device.serial] = {"frame": frame, "video": video, "device": device,
                                      "header": header, "footer": footer,
@@ -1115,6 +1120,16 @@ class App:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _sleep_one_device(self, device):
+        """手动锁定单台群控设备；此按钮允许用户主动锁屏，即使它正在录制。"""
+        number = self._display_number(device)
+
+        def worker():
+            ok, _ = self.adb.shell(device.serial, f"input keyevent {KEY_SLEEP}")
+            self.log(f"锁屏: {number:02d}" if ok else f"锁屏失败: {number:02d}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
     # ---------------- 录屏 ----------------
     def _safe_name(self, s):
         return re.sub(r'[\\/:*?"<>|\s]+', "_", s).strip("_") or "device"
@@ -1242,7 +1257,7 @@ class App:
         tile = self.tiles.get(serial)
         if tile and tile.get("recbtn"):
             rec = serial in self.recording
-            tile["recbtn"].config(text="■ 停止" if rec else "● 录制",
+            tile["recbtn"].config(text="■停止" if rec else "●录制",
                                   fg="#e03131" if rec else "#888")
         if serial in self.tiles:
             self._update_tile_header(serial)
