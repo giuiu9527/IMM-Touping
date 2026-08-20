@@ -364,10 +364,14 @@ class App:
         self._encoder_cache = []        # 编码器检测缓存
         self._known_serials = set()
         self._last_cols = 0
+        self._root_minimized = False
+        self._restore_overlays_id = None
         os.makedirs(config.RECORDS_DIR, exist_ok=True)
 
         self._build_ui()
         self.root.bind("<Configure>", self._on_configure)
+        self.root.bind("<Unmap>", self._on_root_unmap, add="+")
+        self.root.bind("<Map>", self._on_root_map, add="+")
         if _HAS_DND:
             self.root.drop_target_register(DND_FILES)
             self.root.dnd_bind("<<Drop>>", self._on_drop)
@@ -539,9 +543,10 @@ class App:
         if sig != self._list_sig:
             self._list_sig = sig
             self._render_list(devs)
+            # 设备/编号/标签变化才需要重排；无变化的 4 秒轮询不再移动全部原生窗口。
+            self._reflow()
         else:
             self._update_status()
-        self._reflow()
 
     # ---------------- 标签 ----------------
     def _device_tags(self, d):
@@ -845,13 +850,15 @@ class App:
             return
         rect = self._visible_video_rect(tile["video"])
         if not rect:
-            embed.user32.ShowWindow(tile["hwnd"], embed.SW_HIDE)
+            self._hide_overlay(tile)
             return
         x, y, w, h = rect
         # 重绘用的 2px 抖动也不能越过网格底边。
         if y + h + dh > self.grid_frame.winfo_rooty() + self.grid_frame.winfo_height():
             dh = 0
         embed.place(tile["hwnd"], x, y, w, h + dh)
+        tile["overlay_visible"] = True
+        tile["placed_rect"] = (x, y, w, h + dh)
 
     def _owner_hwnd(self):
         return embed.root_hwnd(int(self.root.winfo_id()))
@@ -865,9 +872,25 @@ class App:
         if not rect:
             # owned window 不是 Tk 真子窗口，Tk 无法替我们裁剪它；格子不可完整
             # 见时必须主动隐藏，否则它会以顶层原生窗口形式越出软件边界。
-            embed.user32.ShowWindow(tile["hwnd"], embed.SW_HIDE)
+            self._hide_overlay(tile)
             return
+        self._place_overlay(tile, rect)
+
+    def _hide_overlay(self, tile):
+        """只在可见状态变化时隐藏原生窗口，避免最小化期间反复发 Win32 消息。"""
+        if tile.get("overlay_visible"):
+            embed.user32.ShowWindow(tile["hwnd"], embed.SW_HIDE)
+            tile["overlay_visible"] = False
+        tile["placed_rect"] = None
+
+    def _place_overlay(self, tile, rect):
+        """仅坐标/可见状态变化时才移动 scrcpy，降低多机群控的 UI 压力。"""
+        if tile.get("overlay_visible") and tile.get("placed_rect") == rect:
+            return False
         embed.place(tile["hwnd"], *rect)
+        tile["overlay_visible"] = True
+        tile["placed_rect"] = rect
+        return True
 
     def _visible_video_rect(self, video):
         """返回完全位于右侧网格内的视频区坐标；越界时返回 None。
@@ -876,7 +899,8 @@ class App:
         校验是最后一道边界：布局短暂不稳定、窗体缩小或 DPI 重算期间，都不能让
         原生窗口显示到主程序外面。
         """
-        if not video or not video.winfo_ismapped() or not self.grid_frame.winfo_ismapped():
+        if (self._root_minimized or not video or not video.winfo_ismapped()
+                or not self.grid_frame.winfo_ismapped()):
             return None
         x, y = video.winfo_rootx(), video.winfo_rooty()
         w, h = video.winfo_width(), video.winfo_height()
@@ -905,6 +929,8 @@ class App:
 
     def _on_configure(self, _event=None):
         # 防抖：拖动时 <Configure> 每秒触发几十次，合并到约 60fps，避免卡顿
+        if self._root_minimized or self.root.state() == "iconic":
+            return
         if getattr(self, "_repos_pending", False):
             return
         self._repos_pending = True
@@ -923,10 +949,40 @@ class App:
                 continue
             rect = self._visible_video_rect(v)
             if rect:
-                items.append((tile["hwnd"], *rect))
+                if not (tile.get("overlay_visible") and tile.get("placed_rect") == rect):
+                    items.append((tile["hwnd"], *rect))
+                    tile["overlay_visible"] = True
+                    tile["placed_rect"] = rect
             else:
-                embed.user32.ShowWindow(tile["hwnd"], embed.SW_HIDE)
+                self._hide_overlay(tile)
         embed.batch_place(items)
+
+    def _on_root_unmap(self, event):
+        """主窗口最小化时只隐藏一次全部原生窗口，避免它们留在桌面或反复刷新。"""
+        if event.widget is not self.root:
+            return
+        self._root_minimized = True
+        if self._restore_overlays_id:
+            self.root.after_cancel(self._restore_overlays_id)
+            self._restore_overlays_id = None
+        for tile in self.tiles.values():
+            if tile.get("hwnd"):
+                self._hide_overlay(tile)
+
+    def _on_root_map(self, event):
+        """恢复窗口后等待 Tk 完成布局，再一次性重新排放全部 scrcpy 窗口。"""
+        if event.widget is not self.root:
+            return
+        self._root_minimized = False
+        if self._restore_overlays_id:
+            self.root.after_cancel(self._restore_overlays_id)
+        self._restore_overlays_id = self.root.after(180, self._restore_overlays)
+
+    def _restore_overlays(self):
+        self._restore_overlays_id = None
+        if self.root.state() != "iconic":
+            self._reflow()
+            self._position_all_overlays()
 
     def _update_tile_header(self, serial):
         tile = self.tiles.get(serial)
@@ -949,10 +1005,7 @@ class App:
             rec.pack(side=RIGHT, padx=4)
             self._rec_labels.append(rec)
         header.bind("<Double-Button-1>", lambda e, d=dev: self._edit_device(d))
-        # 标签长度会影响标题的请求尺寸；下一轮按实际边界重排，防止新增/改名后
-        # 仍沿用旧列数。
-        self._last_cols = 0
-        self.root.after_idle(self._reflow)
+        # 标题栏宽度已固定为视频格子宽度，改标签不会再影响列数。
 
     def _reconnect_device(self, device):
         """重连单台群控画面：停掉旧 scrcpy + 移除黑屏格子，稍等再重开。

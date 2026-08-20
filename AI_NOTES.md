@@ -87,6 +87,7 @@ settings.json/devices.json/records/  # 运行时生成（gitignore）
 ### 坑#7 —— 拖动窗口不流畅
 - 根因是"贴原生窗口"架构：Tk 界面和 N 个原生 scrcpy 窗口不同步。**不是 Python 的锅**。
 - 已优化：`embed.batch_place` 用 `DeferWindowPos` 一次性原子移动所有窗口；主窗口 `<Configure>` 做防抖(`_on_configure`→`after(16,...)`)。
+- **避免无效重排**：设备轮询只有列表/编号/标签状态改变时才 `_reflow`；`_place_overlay` 会跳过坐标未变化的窗口。主窗口最小化时一次性隐藏全部 owned window，恢复后等 180ms 布局稳定再复位，不能在最小化期间反复 `ShowWindow`/定位。
 - **要真正丝滑得换架构**：不贴原生窗口，而是自己接 scrcpy 视频流、解码 H.264、渲染进软件画布。工作量大，未做。
 
 ---
